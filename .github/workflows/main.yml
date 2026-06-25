@@ -28,34 +28,34 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
-          cat > config/custom.yaml << EOYAML
-zotero:
-  user_id: "$ZOTERO_ID"
-  api_key: "$ZOTERO_KEY"
-  include_path: null
+          cat > config/custom.yaml << 'EOYAML'
+          zotero:
+            user_id: ""
+            api_key: ""
+            include_path: null
 
-email:
-  sender: "$SENDER"
-  receiver: "$RECEIVER"
-  smtp_server: smtp.qq.com
-  smtp_port: 465
-  sender_password: "$SENDER_PASSWORD"
+          email:
+            sender: ""
+            receiver: ""
+            smtp_server: smtp.qq.com
+            smtp_port: 465
+            sender_password: ""
 
-llm:
-  api:
-    key: "$OPENAI_API_KEY"
-    base_url: "$OPENAI_API_BASE"
-  generation_kwargs:
-    model: gpt-4o-mini
+          llm:
+            api:
+              key: ""
+              base_url: ""
+            generation_kwargs:
+              model: gpt-4o-mini
 
-source:
-  arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+          source:
+            arxiv:
+              category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
 
-executor:
-  debug: true
-  source: ["arxiv"]
-EOYAML
+          executor:
+            debug: true
+            source: ["arxiv"]
+          EOYAML
           echo "Use custom config: "
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py

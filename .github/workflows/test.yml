@@ -36,17 +36,7 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
         run: |
           export DEBUG=true
-          python3 -c "
-import os,yaml;
-cfg={
-'zotero':{'user_id':os.environ['ZOTERO_ID'],'api_key':os.environ['ZOTERO_KEY'],'include_path':None},
-'email':{'sender':os.environ['SENDER'],'receiver':os.environ['RECEIVER'],'smtp_server':'smtp.qq.com','smtp_port':465,'sender_password':os.environ['SENDER_PASSWORD']},
-'llm':{'api':{'key':os.environ['OPENAI_API_KEY'],'base_url':os.environ['OPENAI_API_BASE']},'generation_kwargs':{'model':'gpt-4o-mini'}},
-'source':{'arxiv':{'category':['cs.AI','cs.CV','cs.LG','cs.CL'],'include_cross_list':False}},
-'executor':{'debug':True,'source':['arxiv']}
-}
-with open('config/custom.yaml','w') as f: yaml.dump(cfg,f,default_flow_style=False)
-"
+          python3 -c "import os,yaml;cfg={'zotero':{'user_id':os.environ['ZOTERO_ID'],'api_key':os.environ['ZOTERO_KEY'],'include_path':None},'email':{'sender':os.environ['SENDER'],'receiver':os.environ['RECEIVER'],'smtp_server':'smtp.qq.com','smtp_port':465,'sender_password':os.environ['SENDER_PASSWORD']},'llm':{'api':{'key':os.environ['OPENAI_API_KEY'],'base_url':os.environ['OPENAI_API_BASE']},'generation_kwargs':{'model':'gpt-4o-mini'}},'source':{'arxiv':{'category':['cs.AI','cs.CV','cs.LG','cs.CL']}},'executor':{'debug':True,'source':['arxiv']}};open('config/custom.yaml','w').write(yaml.dump(cfg,default_flow_style=False))"
           echo "--- custom.yaml ---"
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py

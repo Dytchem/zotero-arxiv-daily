@@ -28,40 +28,7 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           export DEBUG=true
-          python3 -c "
-import os,yaml
-cfg = {
-    'zotero': {
-        'user_id': os.environ.get('ZOTERO_ID',''),
-        'api_key': os.environ.get('ZOTERO_KEY',''),
-        'include_path': None
-    },
-    'email': {
-        'sender': os.environ.get('SENDER',''),
-        'receiver': os.environ.get('RECEIVER',''),
-        'smtp_server': 'smtp.qq.com',
-        'smtp_port': 465,
-        'sender_password': os.environ.get('SENDER_PASSWORD','')
-    },
-    'llm': {
-        'api': {
-            'key': os.environ.get('OPENAI_API_KEY',''),
-            'base_url': os.environ.get('OPENAI_API_BASE','')
-        },
-        'generation_kwargs': {'model': 'gpt-4o-mini'}
-    },
-    'source': {
-        'arxiv': {
-            'category': ['cs.AI','cs.CV','cs.LG','cs.CL']
-        }
-    },
-    'executor': {
-        'debug': True,
-        'source': ['arxiv']
-    }
-}
-open('config/custom.yaml','w').write(yaml.dump(cfg,default_flow_style=False))
-"
-          echo "--- custom.yaml ---"
+          printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
+          echo "Use custom config: "
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py

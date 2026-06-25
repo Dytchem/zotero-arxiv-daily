@@ -18,22 +18,13 @@ jobs:
 
       - name: Run script
         env:
-          ZOTERO_ID: ${{ secrets.ZOTERO_ID }}
-          ZOTERO_KEY: ${{ secrets.ZOTERO_KEY }}
-          SENDER: ${{ secrets.SENDER }}
-          RECEIVER: ${{ secrets.RECEIVER }}
-          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
-      - name: Run script
-        env:
-          ZOTERO_ID: ${{ secrets.ZOTERO_ID }}
-          ZOTERO_KEY: ${{ secrets.ZOTERO_KEY }}
-          SENDER: ${{ secrets.SENDER }}
-          RECEIVER: ${{ secrets.RECEIVER }}
-          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          ZOTERO_ID: \${{ secrets.ZOTERO_ID }}
+          ZOTERO_KEY: \${{ secrets.ZOTERO_KEY }}
+          SENDER: \${{ secrets.SENDER }}
+          RECEIVER: \${{ secrets.RECEIVER }}
+          SENDER_PASSWORD: \${{ secrets.SENDER_PASSWORD }}
+          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: \${{ secrets.OPENAI_API_BASE }}
         run: |
           export DEBUG=true
           python3 -c "import os,yaml;cfg={'zotero':{'user_id':os.environ['ZOTERO_ID'],'api_key':os.environ['ZOTERO_KEY'],'include_path':None},'email':{'sender':os.environ['SENDER'],'receiver':os.environ['RECEIVER'],'smtp_server':'smtp.qq.com','smtp_port':465,'sender_password':os.environ['SENDER_PASSWORD']},'llm':{'api':{'key':os.environ['OPENAI_API_KEY'],'base_url':os.environ['OPENAI_API_BASE']},'generation_kwargs':{'model':'gpt-4o-mini'}},'source':{'arxiv':{'category':['cs.AI','cs.CV','cs.LG','cs.CL']}},'executor':{'debug':True,'source':['arxiv']}};open('config/custom.yaml','w').write(yaml.dump(cfg,default_flow_style=False))"

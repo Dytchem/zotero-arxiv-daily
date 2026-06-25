@@ -30,4 +30,5 @@ jobs:
           python3 -c "import os,yaml;cfg={'zotero':{'user_id':os.environ['ZOTERO_ID'].strip(),'api_key':os.environ['ZOTERO_KEY'].strip(),'include_path':None},'email':{'sender':os.environ['SENDER'].strip(),'receiver':os.environ['RECEIVER'].strip(),'smtp_server':'smtp.qq.com','smtp_port':465,'sender_password':os.environ['SENDER_PASSWORD'].strip()},'llm':{'api':{'key':os.environ['OPENAI_API_KEY'].strip(),'base_url':os.environ['OPENAI_API_BASE'].strip()},'generation_kwargs':{'model':'gpt-4o-mini'}},'source':{'arxiv':{'category':['cs.AI','cs.CV','cs.LG','cs.CL']}},'executor':{'debug':True,'source':['arxiv']}};open('config/custom.yaml','w').write(yaml.dump(cfg,default_flow_style=False))"
           echo "--- custom.yaml ---"
           cat config/custom.yaml
+          python3 -c "import yaml;cfg=yaml.safe_load(open('config/custom.yaml'));print(list(cfg['zotero'].keys()));print('user_id len:',len(str(cfg['zotero']['user_id'])));print('api_key len:',len(str(cfg['zotero']['api_key'])))"
           uv run src/zotero_arxiv_daily/main.py

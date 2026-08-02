@@ -288,7 +288,9 @@ class Executor:
         label = "arXiv" if sources == ["arxiv"] or len(sources) == 0 else "Digest (" + ", ".join(sources) + ")"
         return f"Daily {label} {_dt.datetime.now().strftime('%Y/%m/%d')}"
 
-    def _write_run_report(self, *, corpus: int, candidates: int, ranked: int, elapsed: float) -> None:
+    def _write_run_report(
+        self, *, corpus: int, candidates: int, ranked: int, elapsed: float, failures: list[str] | None = None
+    ) -> None:
         """Persist a machine-readable summary of this run to cache_dir/last_run.json."""
         try:
             import json
@@ -301,6 +303,7 @@ class Executor:
                 "elapsed_s": round(elapsed, 1),
                 "source": list(self.config.executor.source),
                 "reranker": self.config.executor.reranker,
+                "source_failures": failures or [],
             }
             path = self._sent_history_path().parent / "last_run.json"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,9 +322,15 @@ class Executor:
             logger.error(f"No zotero papers found. Please check your zotero settings:\n{self.config.zotero}")
             return
         all_papers = []
+        source_failures: list[str] = []
         for source, retriever in self.retrievers.items():
             logger.info(f"Retrieving {source} papers...")
-            papers = retriever.retrieve_papers()
+            try:
+                papers = retriever.retrieve_papers()
+            except Exception as exc:
+                logger.warning(f"{source} retrieval failed ({exc}); continuing with other sources")
+                source_failures.append(source)
+                continue
             if len(papers) == 0:
                 logger.info(f"No {source} papers found")
                 continue
@@ -341,6 +350,11 @@ class Executor:
             self._generate_summaries(reranked_papers)
         if not reranked_papers and not self.config.executor.send_empty:
             logger.info("No qualifying papers found. No email will be sent.")
+            self._write_run_report(
+                corpus=len(corpus), candidates=len(all_papers),
+                ranked=0, elapsed=time.time() - t0,
+                failures=source_failures,
+            )
             return
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)
@@ -356,5 +370,6 @@ class Executor:
         self._write_run_report(
             corpus=len(corpus), candidates=len(all_papers),
             ranked=len(reranked_papers), elapsed=time.time() - t0,
+            failures=source_failures,
         )
         logger.info("Email sent successfully")

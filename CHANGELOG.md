@@ -22,6 +22,8 @@ All notable changes to this project are documented here.
 - CI now enforces a coverage floor (`--cov-fail-under=80`).
 - Email/digest subject is now source-aware (`Daily arXiv 2026/08/02` vs `Daily Digest (arxiv, biorxiv) 2026/08/02`).
 - Workflow cache key fixed to `corpus-embeddings` so GitHub Actions overwrites one cache entry instead of accumulating one per run.
+- Resilience: a failing source (e.g. one API down) no longer kills the whole run — other sources still deliver, and the failure is recorded in the run report (`last_run.json`).
+- Run report is now also written on the no-email path, so every execution leaves a machine-readable trace.
 
 ### Changed
 - No-email decision now also triggers when every candidate was filtered out by `min_score` (previously only when zero papers were retrieved).

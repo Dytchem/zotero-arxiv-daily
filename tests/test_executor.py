@@ -555,7 +555,7 @@ def test_write_run_report(tmp_path):
 
     executor = Executor.__new__(Executor)
     executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path), "source": ["arxiv"], "reranker": "api"}})
-    executor._write_run_report(corpus=3, candidates=10, ranked=4, elapsed=2.5)
+    executor._write_run_report(corpus=3, candidates=10, ranked=4, elapsed=2.5, failures=["biorxiv"])
 
     report_path = tmp_path / "last_run.json"
     assert report_path.exists()
@@ -566,6 +566,7 @@ def test_write_run_report(tmp_path):
     assert data["elapsed_s"] == 2.5
     assert data["source"] == ["arxiv"]
     assert data["reranker"] == "api"
+    assert data["source_failures"] == ["biorxiv"]
     assert "ts" in data
 
 
@@ -576,6 +577,54 @@ def test_write_run_report_does_not_raise_on_bad_config(tmp_path):
     executor = Executor.__new__(Executor)
     executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path)}})
     executor._write_run_report(corpus=1, candidates=2, ranked=3, elapsed=0.1)  # no raise
+
+
+def test_run_single_source_failure_degrades(config, monkeypatch, tmp_path):
+    """One failing source must not kill the run; others still deliver."""
+    import smtplib
+
+    from omegaconf import open_dict
+
+    from tests.canned_responses import (
+        make_sample_paper,
+        make_stub_openai_client,
+        make_stub_smtp,
+        make_stub_zotero_client,
+    )
+
+    with open_dict(config):
+        config.executor.source = ["arxiv", "biorxiv"]
+        config.executor.reranker = "api"
+        config.executor.send_empty = False
+        config.executor.cache_dir = str(tmp_path)
+        config.reranker.api.cache_dir = str(tmp_path)
+        config.source.biorxiv = {"category": ["bioinformatics"]}
+
+    stub_zot = make_stub_zotero_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    def _ok(self):
+        return [make_sample_paper(title="OK Paper", url="https://arxiv.org/abs/degrade-ok")]
+
+    def _boom(self):
+        raise RuntimeError("biorxiv API down")
+
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", _ok)
+    monkeypatch.setattr(registered_retrievers["biorxiv"], "retrieve_papers", _boom)
+
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+
+    executor = Executor(config)
+    executor.run()
+
+    assert len(sent) == 1, "Email must still be sent when one source fails"
 
 
 # ---------------------------------------------------------------------------

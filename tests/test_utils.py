@@ -306,3 +306,36 @@ class TestBm25Scores:
         scores = bm25_scores(["", "!!!", "a"], ["a b", "b c"])
         assert scores[0].sum() == 0.0
         assert scores[1].sum() == 0.0
+
+
+def test_send_email_multiple_receivers(config, monkeypatch):
+    """Extra receivers land in Cc and are all passed to sendmail."""
+    import smtplib
+
+    from omegaconf import open_dict
+
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+    with open_dict(config.email):
+        config.email.receivers = ["cc1@example.com", "cc2@example.com"]
+    send_email(config, "<html></html>")
+
+    _, recipients, body = sent[0]
+    assert recipients == ["test@example.com", "cc1@example.com", "cc2@example.com"]
+    assert "Cc:" in body
+
+
+def test_send_email_receivers_string_support(config, monkeypatch):
+    """receivers given as a comma-separated string is also accepted."""
+    import smtplib
+
+    from omegaconf import open_dict
+
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+    with open_dict(config.email):
+        config.email.receivers = "cc1@example.com, cc2@example.com"
+    send_email(config, "<html></html>")
+
+    _, recipients, body = sent[0]
+    assert recipients == ["test@example.com", "cc1@example.com", "cc2@example.com"]

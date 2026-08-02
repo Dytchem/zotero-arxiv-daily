@@ -165,9 +165,19 @@ def glob_match(path:str, pattern:str) -> bool:
     re_pattern = glob.translate(pattern,recursive=True)
     return re.match(re_pattern, path) is not None
 
+def _collect_receivers(config: DictConfig) -> list[str]:
+    """Primary recipient + optional extra recipients (deduplicated, order kept)."""
+    primary = config.email.receiver
+    extra = config.email.get("receivers") or []
+    if isinstance(extra, str):
+        extra = [e.strip() for e in extra.split(",") if e.strip()]
+    receivers = [primary] + [r for r in extra if r and r != primary]
+    return list(dict.fromkeys(receivers))
+
+
 def send_email(config:DictConfig, html:str):
     sender = config.email.sender
-    receiver = config.email.receiver
+    receivers = _collect_receivers(config)
     password = config.email.sender_password
     smtp_server = config.email.smtp_server
     smtp_port = config.email.smtp_port
@@ -177,7 +187,9 @@ def send_email(config:DictConfig, html:str):
 
     msg = MIMEText(html, 'html', 'utf-8')
     msg['From'] = _format_addr(f'Github Action <{sender}>')
-    msg['To'] = _format_addr(f'You <{receiver}>')
+    msg['To'] = _format_addr(f'You <{receivers[0]}>')
+    if len(receivers) > 1:
+        msg['Cc'] = ', '.join(_format_addr(f'CC <{r}>') for r in receivers[1:])
     today = datetime.datetime.now().strftime('%Y/%m/%d')
     msg['Subject'] = Header(f'Daily arXiv {today}', 'utf-8').encode()
 
@@ -193,5 +205,5 @@ def send_email(config:DictConfig, html:str):
             server = smtplib.SMTP(smtp_server, smtp_port)
 
     server.login(sender, password)
-    server.sendmail(sender, [receiver], msg.as_string())
+    server.sendmail(sender, receivers, msg.as_string())
     server.quit()

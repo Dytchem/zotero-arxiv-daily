@@ -7,7 +7,8 @@ import tarfile
 import pytest
 
 from tests.canned_responses import make_stub_smtp
-from zotero_arxiv_daily.utils import _bm25_pick, bm25_scores, extract_tex_code_from_tar, glob_match, send_email
+from zotero_arxiv_daily.email_sender import send_email
+from zotero_arxiv_daily.utils import _bm25_pick, bm25_scores, extract_tex_code_from_tar, glob_match
 
 # ---------------------------------------------------------------------------
 # glob_match — migrated from test_glob_match.py

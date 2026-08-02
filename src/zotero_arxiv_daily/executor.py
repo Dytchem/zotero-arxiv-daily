@@ -14,7 +14,7 @@ from .construct_email import render_email
 from .protocol import CorpusPaper, Paper
 from .reranker import get_reranker_cls
 from .retriever import get_retriever_cls
-from .utils import glob_match, send_email
+from .utils import glob_match
 
 
 def normalize_path_patterns(patterns: list[str] | ListConfig | None, config_key: str) -> list[str] | None:
@@ -269,6 +269,16 @@ class Executor:
         except Exception as exc:
             logger.warning(f"Failed to fetch full text for {paper.title}: {exc}")
 
+    def _deliver(self, html: str) -> None:
+        """Fan out the digest to every configured notifier (default: email)."""
+        from .notifier import get_notifier_cls
+
+        names = self.config.executor.get("notifiers") or ["email"]
+        for name in names:
+            notifier = get_notifier_cls(name)(self.config)
+            logger.info(f"Delivering via notifier={name}...")
+            notifier.send(html)
+
     def run(self):
         import time
         t0 = time.time()
@@ -303,7 +313,7 @@ class Executor:
             return
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)
-        send_email(self.config, email_content)
+        self._deliver(email_content)
         if reranked_papers and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
             sent = self._load_sent_history()
             sent.update(p.url for p in reranked_papers)

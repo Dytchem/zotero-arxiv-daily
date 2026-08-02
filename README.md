@@ -116,6 +116,7 @@ executor:
   debug: ${oc.env:DEBUG,null}
   source: ['arxiv']
   # min_score: 0.5 # Optional: only keep papers with relevance score >= this (0-10). null keeps all.
+  # notifiers: ['email', 'webhook'] # Optional: fan out the digest to extra channels.
 ```
 Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
 >[!NOTE]
@@ -173,6 +174,10 @@ executor:
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_paper_num: 100 # The maximum number of the papers presented in the email. Example: 100
   min_score: null # Minimum relevance score (0-10) to include a paper; null keeps all. Example: 0.5
+  keywords_include: null # Only keep papers whose title/abstract contains ANY of these substrings. Example: ["diffusion", "LLM"]
+  keywords_exclude: null # Drop papers whose title/abstract contains ANY of these substrings. Example: ["survey", "tutorial"]
+  dedupe_history: true # Skip papers already emailed in previous runs. Disabled automatically in debug mode. Example: true
+  notifiers: ['email'] # Delivery channels: 'email', 'webhook' (or both). Example: ['email', 'webhook']
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
 ```

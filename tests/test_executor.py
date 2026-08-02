@@ -365,3 +365,17 @@ def test_validate_config_missing_reranker_api_model(config):
         config.reranker.api.model = None
     with pytest.raises(ValueError, match="reranker.api.model"):
         Executor(config)
+
+
+def test_dedupe_papers_by_url():
+    """Duplicate papers (cross-listed categories) are dropped by URL."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    papers = [
+        make_sample_paper(title="A", url="https://arxiv.org/abs/1"),
+        make_sample_paper(title="A dup", url="https://arxiv.org/abs/1"),
+        make_sample_paper(title="B", url="https://arxiv.org/abs/2"),
+    ]
+    deduped = Executor._dedupe_papers(papers)
+    assert [p.title for p in deduped] == ["A", "B"]

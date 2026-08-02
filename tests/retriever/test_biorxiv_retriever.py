@@ -57,3 +57,20 @@ def test_biorxiv_requires_category(config):
         config.source.biorxiv = {"category": None}
     with pytest.raises(ValueError, match="category must be specified"):
         BiorxivRetriever(config)
+
+
+def test_fetch_full_text_uses_pdf_extraction(config, monkeypatch):
+    """bioRxiv fetch_full_text delegates to the shared PDF extraction."""
+    from tests.canned_responses import make_sample_paper
+
+    called = []
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.retriever.arxiv_retriever.extract_text_from_pdf",
+        lambda paper: (called.append(paper), "pdf text")[1],
+    )
+    with open_dict(config.source):
+        config.source.biorxiv = {"category": ["bioinformatics"]}
+    retriever = BiorxivRetriever(config)
+    paper = make_sample_paper(pdf_url="https://www.biorxiv.org/content/10.1101/123v1.full.pdf")
+    assert retriever.fetch_full_text(paper) == "pdf text"
+    assert called == [paper]

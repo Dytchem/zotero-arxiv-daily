@@ -62,3 +62,8 @@ class BiorxivRetriever(BaseRetriever):
             pdf_url=pdf_url,
             full_text=full_text
         )
+
+    def fetch_full_text(self, paper: Paper) -> str | None:
+        """bioRxiv/medRxiv PDFs are open access; extract text from the PDF URL."""
+        from .arxiv_retriever import extract_text_from_pdf
+        return extract_text_from_pdf(paper)

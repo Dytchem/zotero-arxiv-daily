@@ -19,6 +19,13 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Cache corpus embeddings
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: corpus-embeddings-${{ github.run_id }}
+          restore-keys: corpus-embeddings-
+
       - name: Run script
         env:
           ZOTERO_ID: ${{ secrets.ZOTERO_ID }}

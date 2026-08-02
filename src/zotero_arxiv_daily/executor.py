@@ -142,6 +142,18 @@ class Executor:
             for _ in tqdm(as_completed(futures), total=len(futures), desc="Generating summaries"):
                 pass
 
+    @staticmethod
+    def _dedupe_papers(papers: list[Paper]) -> list[Paper]:
+        """Drop duplicate papers by URL (cross-listed categories can repeat entries)."""
+        seen: set[str] = set()
+        result = []
+        for p in papers:
+            if p.url in seen:
+                continue
+            seen.add(p.url)
+            result.append(p)
+        return result
+
     def _populate_full_text(self, paper: Paper) -> None:
         """Fetch full text lazily — only for papers that made it past reranking."""
         if paper.full_text is not None:
@@ -171,6 +183,7 @@ class Executor:
                 continue
             logger.info(f"Retrieved {len(papers)} {source} papers")
             all_papers.extend(papers)
+        all_papers = self._dedupe_papers(all_papers)
         logger.info(f"Total {len(all_papers)} papers retrieved from all sources")
         reranked_papers = []
         if len(all_papers) > 0:

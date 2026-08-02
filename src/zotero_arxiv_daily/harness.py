@@ -74,6 +74,15 @@ class ResearchProfile:
     summary: str = ""
 
 
+@dataclass
+class Evaluation:
+    """Structured feedback from the independent evaluator agent."""
+
+    score: float = 0.0
+    issues: list[dict] = field(default_factory=list)
+    verdict: str = "revise"  # "approve" | "revise"
+
+
 # ----------------------------------------------------------------------
 # Small helpers
 # ----------------------------------------------------------------------
@@ -384,7 +393,14 @@ class HarnessAgent:
     # -- digest generation ---------------------------------------------
 
     def generate(self, candidates: list[Paper], corpus: list[CorpusPaper]) -> Digest | None:
-        """Run the agent loop and return the Digest. None on any failure."""
+        """Run the two-agent loop and return the Digest. None on any failure.
+
+        Generator agent explores and writes a draft; an independent evaluator
+        (fresh context, no tools) grades it; if the verdict is ``revise`` and
+        revision budget remains, the issues are fed back and the generator
+        tries again. An ``approve`` verdict or exhausted budget returns the
+        best draft so far.
+        """
         if self.client is None or not candidates:
             return None
         profile = self.build_profile(corpus)
@@ -398,6 +414,59 @@ class HarnessAgent:
             f"Summary: {profile.summary}"
         )
 
+        harness_cfg = self.config.llm.get("harness") or {}
+        max_steps = int(harness_cfg.get("max_steps", 12))
+        min_inspections = int(harness_cfg.get("min_inspections", 3))
+        max_revisions = int(harness_cfg.get("max_revisions", 2))
+        evaluator_enabled = bool(harness_cfg.get("evaluator_enabled", True))
+
+        digest: Digest | None = None
+        feedback: str | None = None
+        for round_no in range(max_revisions + 1):
+            if round_no:
+                logger.info(f"Harness revision round {round_no}/{max_revisions}...")
+            digest = self._generator_loop(
+                candidates, profile_text, max_steps, min_inspections, feedback=feedback
+            )
+            if digest is None:
+                return None
+            if not evaluator_enabled:
+                return digest
+
+            evaluation = self._evaluate(profile_text, candidates, digest)
+            if evaluation is None or evaluation.verdict == "approve":
+                if evaluation is not None and evaluation.issues:
+                    logger.info(
+                        f"Evaluator approved (score={evaluation.score}) with "
+                        f"{len(evaluation.issues)} minor note(s)"
+                    )
+                return digest
+
+            logger.warning(
+                f"Evaluator scored {evaluation.score}/10, verdict=revise, "
+                f"{len(evaluation.issues)} issue(s)"
+            )
+            feedback = self._feedback_prompt(evaluation)
+            if round_no >= max_revisions:
+                logger.warning("Revision budget exhausted; returning last draft")
+                return digest
+
+        return digest
+
+    def _generator_loop(
+        self,
+        candidates: list[Paper],
+        profile_text: str,
+        max_steps: int,
+        min_inspections: int,
+        feedback: str | None = None,
+    ) -> Digest | None:
+        """One generator pass: SURVEY -> DEEP-DIVE -> FOCUS -> DECIDE -> SUBMIT.
+
+        ``feedback`` (optional) carries the evaluator's issues from a previous
+        round; when present it is prepended to the user context so the agent
+        revises the draft instead of starting from scratch.
+        """
         system_prompt = (
             "You are an elite research-recommendation agent. Your job is to read a "
             "scientist's research profile, inspect the day's candidate papers, and "
@@ -442,12 +511,12 @@ class HarnessAgent:
         )
 
         messages = [{"role": "system", "content": system_prompt}]
+        if feedback:
+            messages.append({"role": "user", "content": feedback})
+
         digest: Digest | None = None
-        max_steps = 12
-        min_inspections = 3
         inspected: set[int] = set()
 
-        # Keep full texts of inspected papers for tools.
         for step in range(max_steps):
             try:
                 response = self.client.chat.completions.create(
@@ -541,6 +610,95 @@ class HarnessAgent:
 
         logger.warning("Harness agent reached max steps without submitting a digest")
         return digest
+
+    def _evaluate(
+        self,
+        profile_text: str,
+        candidates: list[Paper],
+        draft: Digest,
+    ) -> Evaluation | None:
+        """Independent reviewer: fresh context, no tools, strict JSON verdict.
+
+        Returns None on any failure (caller treats None as 'keep the draft').
+        """
+        if self.client is None:
+            return None
+        brief_lines = []
+        for i, p in enumerate(candidates):
+            score = round(p.score, 1) if p.score is not None else "?"
+            brief_lines.append(f"[{i}] {p.title} | embedding={score}/10 | {p.source}")
+        candidate_brief = "\n".join(brief_lines) if brief_lines else "(no candidates)"
+
+        draft_lines = [f"Subject: {draft.subject}", f"Intro: {draft.intro}"]
+        for dp in draft.papers:
+            title = candidates[dp.index].title if 0 <= dp.index < len(candidates) else f"(paper {dp.index})"
+            draft_lines.append(f"- [{dp.index}] {title}: {dp.reason}")
+        draft_lines.append(f"Outro: {draft.outro}")
+        draft_text = "\n".join(draft_lines)
+
+        prompt = (
+            "You are a strict, independent reviewer of a daily research-digest "
+            "email. You have NOT written it yourself — judge it on its own merits.\n\n"
+            f"Researcher profile:\n{profile_text}\n\n"
+            f"Candidates available (embedding score is a hint):\n{candidate_brief}\n\n"
+            f"Draft digest:\n{draft_text}\n\n"
+            "Grade the draft on:\n"
+            "- Relevance: do the picks genuinely serve the profile topics/methods?\n"
+            "- Specificity: is each reason concrete and tied to the paper, or a generic paraphrase?\n"
+            "- Coverage: are any highly-relevant candidates wrongly ignored?\n"
+            "- Language/format: consistent language, no index-number references, sane length.\n\n"
+            "Respond with STRICT JSON only, no markdown, in this exact shape:\n"
+            '{"score": 0.0-10.0, "issues": [{"severity": "high|medium|low", '
+            '"problem": "...", "suggestion": "..."}], "verdict": "approve|revise"}\n'
+            "Rules: verdict 'approve' only when the draft is clearly good; "
+            "any high-severity issue forces 'revise'. List at most 5 issues, "
+            "most important first. Be specific and actionable."
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "You output valid JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                **self.generation_kwargs,
+            )
+            data = _extract_json(response.choices[0].message.content or "{}")
+            verdict = str(data.get("verdict", "revise")).lower()
+            score = float(data.get("score", 0.0))
+            issues = data.get("issues") or []
+            if not isinstance(issues, list):
+                issues = []
+            return Evaluation(
+                score=score,
+                issues=[{"severity": "medium", "problem": str(i)} if isinstance(i, str) else {
+                    "severity": str(i.get("severity", "medium")),
+                    "problem": str(i.get("problem", "")),
+                    "suggestion": str(i.get("suggestion", "")),
+                } for i in issues],
+                verdict=verdict if verdict in ("approve", "revise") else "revise",
+            )
+        except Exception as exc:
+            logger.warning(f"Evaluator call failed (keeping draft): {exc}")
+            return None
+
+    @staticmethod
+    def _feedback_prompt(evaluation: Evaluation) -> str:
+        """Turn an Evaluation into user context for the next generator round."""
+        lines = [
+            "An independent reviewer evaluated your draft and asks for revision. "
+            "Fix these issues and resubmit via submit_digest:"
+        ]
+        for issue in evaluation.issues:
+            sev = issue.get("severity", "medium")
+            prob = issue.get("problem", "")
+            sug = issue.get("suggestion", "")
+            lines.append(f"- [{sev}] {prob}" + (f" Suggestion: {sug}" if sug else ""))
+        if not evaluation.issues:
+            lines.append("- (reviewer gave no specific issues; tighten the draft overall)")
+        lines.append("Keep papers you are confident about; replace or drop weak picks. "
+                     "Do not just rephrase — actually address the feedback.")
+        return "\n".join(lines)
 
     def _describe_candidates(self, candidates: list[Paper], start: int, count: int) -> str:
         if not candidates:

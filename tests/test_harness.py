@@ -19,13 +19,16 @@ from zotero_arxiv_daily.protocol import CorpusPaper
 # ---------------------------------------------------------------------------
 
 
-def make_agent_client(profile_reply=None, tool_script=None, fail_on=None):
+def make_agent_client(profile_reply=None, tool_script=None, fail_on=None, evaluator_reply=None):
     """Quack like openai.OpenAI; plays a canned tool-call script.
 
     ``tool_script`` is a list of steps. Each step is a dict:
         {"type": "assistant", "tool_calls": [{"id":..., "function": {...}}]}
         {"type": "assistant", "content": "text"}   # plain reply
         {"type": "tool", "content": {...}}          # digest payload
+
+    ``evaluator_reply`` is the JSON string returned for the independent
+    evaluator call (fresh context, no tools) — detect by the reviewer prompt.
     """
     calls = []
 
@@ -35,6 +38,21 @@ def make_agent_client(profile_reply=None, tool_script=None, fail_on=None):
         calls.append(kwargs)
         if fail_on and fail_on in text:
             raise RuntimeError(f"boom: {fail_on}")
+
+        # Evaluator call: fresh context with the reviewer prompt, no tools.
+        if "strict, independent reviewer" in text:
+            if isinstance(evaluator_reply, list):
+                content = evaluator_reply.pop(0) if evaluator_reply else (
+                    '{"score": 8.5, "issues": [], "verdict": "approve"}'
+                )
+            else:
+                content = evaluator_reply or (
+                    '{"score": 8.5, "issues": [], "verdict": "approve"}'
+                )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=None))],
+                id="stub", created=0, model="gpt-5.6-luna", object="chat.completion",
+            )
 
         # First call = profile distillation (no tools).
         if not any(isinstance(m, dict) and m.get("role") == "assistant" for m in messages) \
@@ -341,6 +359,83 @@ def test_search_candidates_filters_by_keyword(config, tmp_path, monkeypatch):
     digest = harness.generate(papers, make_sample_corpus(1))
     assert digest is not None
     assert digest.subject == "s"
+
+
+def test_evaluator_approves_draft(config, tmp_path, monkeypatch):
+    """An approving evaluator returns the draft unchanged (no revision round)."""
+    tool_script = _submit_script()
+    harness, _calls = _make_harness(
+        config, tmp_path, monkeypatch,
+        tool_script=tool_script,
+        evaluator_reply='{"score": 9.0, "issues": [], "verdict": "approve"}',
+    )
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    assert digest.subject == "s"
+
+
+def test_evaluator_revise_triggers_revision_round(config, tmp_path, monkeypatch):
+    """A 'revise' verdict feeds issues back and re-runs the generator; the
+    revised draft wins."""
+    tool_script = _submit_script() + _submit_script(subject="revised")
+    harness, _calls = _make_harness(
+        config, tmp_path, monkeypatch,
+        tool_script=tool_script,
+        evaluator_reply=[
+            '{"score": 4.0, "issues": [{"severity": "high", '
+            '"problem": "Picks do not match profile", "suggestion": "Pick quantum papers"}], '
+            '"verdict": "revise"}',
+            '{"score": 9.0, "issues": [], "verdict": "approve"}',
+        ],
+    )
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    assert digest.subject == "revised"
+
+
+def test_evaluator_failure_keeps_draft(config, tmp_path, monkeypatch):
+    """Evaluator exceptions degrade gracefully: keep the generator's draft."""
+    tool_script = _submit_script()
+    harness, _calls = _make_harness(
+        config, tmp_path, monkeypatch,
+        tool_script=tool_script,
+        fail_on="strict, independent reviewer",
+    )
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    assert digest.subject == "s"
+
+
+def test_evaluator_disabled_skips_review(config, tmp_path, monkeypatch):
+    tool_script = _submit_script()
+    harness, _calls = _make_harness(config, tmp_path, monkeypatch, tool_script=tool_script)
+    with open_dict(harness.config.llm.harness):
+        harness.config.llm.harness.evaluator_enabled = False
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    assert digest.subject == "s"
+
+
+def _submit_script(subject="s"):
+    """A minimal generator script that inspects 3 papers then submits."""
+    return [
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 0}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 1}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 2}'}}]},
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "submit_digest", "arguments": json_dumps({
+                    "subject": subject, "intro": "",
+                    "papers": [{"index": 0, "reason": "r"}], "outro": "",
+                })}},
+            ],
+        },
+    ]
 
 
 def test_generate_returns_none_when_disabled(config, tmp_path, monkeypatch):

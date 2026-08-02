@@ -422,6 +422,8 @@ class HarnessAgent:
 
         digest: Digest | None = None
         feedback: str | None = None
+        best_digest: Digest | None = None
+        best_score: float = -1.0
         for round_no in range(max_revisions + 1):
             if round_no:
                 logger.info(f"Harness revision round {round_no}/{max_revisions}...")
@@ -429,13 +431,21 @@ class HarnessAgent:
                 candidates, profile_text, max_steps, min_inspections, feedback=feedback
             )
             if digest is None:
-                return None
+                return best_digest or None
             if not evaluator_enabled:
                 return digest
 
             evaluation = self._evaluate(profile_text, candidates, digest)
-            if evaluation is None or evaluation.verdict == "approve":
-                if evaluation is not None and evaluation.issues:
+            if evaluation is None:
+                # Evaluator failed — keep the current draft.
+                return digest
+            # Always track the best-scoring draft so budget exhaustion returns
+            # the strongest version, not merely the last one.
+            if evaluation.score > best_score:
+                best_score = evaluation.score
+                best_digest = digest
+            if evaluation.verdict == "approve":
+                if evaluation.issues:
                     logger.info(
                         f"Evaluator approved (score={evaluation.score}) with "
                         f"{len(evaluation.issues)} minor note(s)"
@@ -448,10 +458,13 @@ class HarnessAgent:
             )
             feedback = self._feedback_prompt(evaluation)
             if round_no >= max_revisions:
-                logger.warning("Revision budget exhausted; returning last draft")
-                return digest
+                logger.warning(
+                    f"Revision budget exhausted; returning best draft "
+                    f"(score={best_score})"
+                )
+                return best_digest or digest
 
-        return digest
+        return best_digest or digest
 
     def _generator_loop(
         self,

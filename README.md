@@ -1,86 +1,84 @@
 <p align="center">
-  <a href="" rel="noopener">
- <img width=200px height=200px src="assets/logo.svg" alt="logo"></a>
+  <img width="160" height="160" src="assets/logo.svg" alt="Zotero-arXiv-Daily logo">
 </p>
 
-<h3 align="center">Zotero-arXiv-Daily</h3>
+<h1 align="center">Zotero-arXiv-Daily</h1>
 
-<div align="center">
+<p align="center">
+  <em>Your personal AI research librarian — reads your Zotero library, hunts arXiv every day, and writes a personalised paper digest straight to your inbox.</em>
+</p>
 
-  [![Status](https://img.shields.io/badge/status-active-success.svg)]()
-  ![Stars](https://img.shields.io/github/stars/TideDra/zotero-arxiv-daily?style=flat)
-  [![GitHub Issues](https://img.shields.io/github/issues/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/issues)
-  [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/pulls)
-  [![License](https://img.shields.io/github/license/TideDra/zotero-arxiv-daily)](/LICENSE)
+<p align="center">
+  <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
+  <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
+  <img src="https://img.shields.io/badge/coverage-89%25-brightgreen?style=flat-square" alt="Coverage">
+</p>
 
-</div>
+<p align="center">
+  <a href="README.zh-CN.md">🇨🇳 中文版</a>
+</p>
 
 ---
 
-<p align="center"> A HarnessAgent that reads your Zotero library, hunts arXiv daily, and writes a personalised paper digest — delivered to your inbox.</p>
+## What is it?
 
-> [!IMPORTANT]
-> Keep an eye on this repo. When the upstream updates, merge your fork to enjoy new features and bug fixes.
+**Zotero-arXiv-Daily** is a **HarnessAgent** — an autonomous agent in the spirit of Claude Code, Codex and OpenClaw — that does the job of a research librarian every morning:
 
-## 🇨🇳 中文简介
+1. It **reads your Zotero library** and distills a research profile (topics, keywords, methods).
+2. It **pulls the newest papers** from arXiv, bioRxiv and medRxiv, pre-ranked by embedding similarity.
+3. It **decides what you should read** — inspecting candidates, weighing relevance against your actual interests — and writes the whole email itself: subject, intro, per-paper reasons, outro.
+4. It **delivers a polished HTML digest** to your inbox. Zero cost, fully automated via GitHub Actions.
 
-**Zotero-arXiv-Daily** 的核心是一个 **HarnessAgent**（类似 Claude Code / Codex 的自主 Agent）：
-它读取你的 Zotero 文献库建立研究画像，每天从 arXiv / bioRxiv / medRxiv 抓取新论文，
-经 embedding 粗筛后，agent 自主决定推荐哪些、为什么推，并生成完整邮件发到你邮箱📮。
+> No rigid pipeline. No per-paper score-and-dump. One agent makes every editorial call.
 
-- **单 Agent 架构**：一个 HarnessAgent 搞定全部 —— 蒸馏研究画像 → 审阅候选 → 撰写邮件全文
-- **工具调用循环**：真正的 while-loop + function calling（`inspect_candidates` / `inspect_paper` / `submit_digest`），不是每篇打分
-- **结构化输出**：agent 通过 `submit_digest` 提交结构化 JSON（subject / intro / papers[DigestPaper] / outro），渲染层绝不信任 LLM 原文
-- **安全渲染层**：HTML escape 所有文本字段，LaTeX 公式转 Unicode（`$\\alpha$` → `α`），链接只允许 http(s)
-- **优雅降级**：agent 失败 → 回退到 embedding 顺序 + 简化邮件，保证每日必有邮件
-- **多渠道通知**：邮件 / Webhook（Telegram、Server酱等）
-- **零成本部署**：Fork 仓库 + GitHub Action Secrets 即可每日自动运行
-
-基于 [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily)，感谢原作者的出色工作。
+---
 
 ## ✨ Features
 
 | Feature | Description |
 |---------|-------------|
-| **HarnessAgent** | Single autonomous agent that builds a research profile from your Zotero library, inspects candidates via tool calls, and writes the full digest |
-| **Tool-use loop** | Real OpenAI function-calling cycle: `inspect_candidates`, `inspect_paper`, `submit_digest` — not per-paper scoring |
-| **Structured digest** | Agent submits a typed `Digest` object (subject / intro / papers / outro); render layer trusts only the structure, never raw LLM text |
-| **Safe HTML rendering** | All text fields are HTML-escaped; inline LaTeX is converted to Unicode (`$\\alpha$` → `α`); links are sanitised to http(s) only |
-| **Mail-client hardening** | CJK font stack, Outlook-safe solid-color buttons, responsive `@media` rules, hidden preheader, relevance-desc ordering |
-| **Localised UI** | `llm.language` switches labels (相关度/推荐理由/其他候选 vs Relevance/Why/Other candidates) |
-| **Email archive** | Every run writes `cache_dir/last_email.html`, uploaded as a `last-email` CI artifact for review |
-| **Graceful fallback** | If the agent fails, the pipeline falls back to embedding-ordered cards with simplified emails — you always get something |
-| **Multi-source** | arXiv, bioRxiv, medRxiv with cross-list support |
-| **Hybrid reranking** | BM25 + vector similarity (local or API-based embeddings) |
-| **Keyword filters** | Include/exclude by title/abstract substrings |
-| **Sent-history dedupe** | Skip papers already emailed in previous runs |
-| **Multi-recipient** | Send to multiple email addresses (`email.receivers`) |
-| **Webhook notifier** | Deliver digests via HTTP POST (Telegram bot, Server酱, etc.) |
-| **Zero-cost CI/CD** | Runs on GitHub Actions — no server needed |
+| 🧠 **Single HarnessAgent** | One agent loop distills your research profile, inspects candidates with its own tools, and writes the complete digest |
+| 🔧 **Real tool-use loop** | OpenAI function calling: `inspect_candidates` → `inspect_paper` → `submit_digest` — not mechanical per-paper scoring |
+| 📝 **Structured output** | The agent submits a typed `Digest` (subject / intro / papers / outro); the render layer trusts only the structure, never raw LLM text |
+| 🛡️ **Safe rendering** | Every text field is HTML-escaped, LaTeX becomes Unicode (`$\alpha$` → `α`), links are whitelisted to http(s) |
+| 📧 **Mail-client hardened** | CJK font stack, Outlook-safe solid-color buttons, responsive layout, hidden preheader, relevance-desc ordering |
+| 🌐 **Localised UI** | Labels switch with `llm.language` (Chinese: 相关度/推荐理由/其他候选 · English: Relevance/Why/Other candidates) |
+| 🪂 **Graceful fallback** | If the agent fails, you still get an embedding-ordered digest — the email always goes out |
+| 📦 **Email archive** | Every run saves `cache_dir/last_email.html` and uploads it as a CI artifact for review |
+| 📚 **Multi-source** | arXiv (with weekend API fallback), bioRxiv, medRxiv, cross-list support |
+| 🎯 **Hybrid reranking** | BM25 + vector similarity, local or API embeddings |
+| 🔍 **Keyword filters** | Include/exclude papers by title/abstract substrings |
+| 🚫 **Sent-history dedupe** | Papers already emailed are never re-sent |
+| 👥 **Multi-recipient** | One digest, many inboxes (`email.receivers`) |
+| 🔔 **Webhook notifier** | Telegram, Server酱, Discord, Slack… deliver anywhere via HTTP POST |
+| 💸 **Zero-cost CI/CD** | Runs on GitHub Actions — no server, no subscription |
+
+---
 
 ## 🚀 Quick Start
 
-### 1. Fork & Clone
+### 1. Fork & clone
 
 ```bash
 git clone https://github.com/<YOUR_USERNAME>/zotero-arxiv-daily.git
 cd zotero-arxiv-daily
 ```
 
-### 2. Install Dependencies
+### 2. Install
 
 ```bash
-uv sync          # or: pip install -e .
+uv sync        # or: pip install -e .
 ```
 
 ### 3. Configure
 
-Copy `config/base.yaml` to `config/local.yaml` and fill in the required fields:
+Copy `config/base.yaml` to `config/custom.yaml` and fill in the essentials:
 
 ```yaml
 zotero:
-  user_id: "12345678"
-  api_key: "your-zotero-api-key"
+  user_id: "12345678"          # your Zotero user id
+  api_key: "sk-..."            # Zotero API key (read access)
 
 source:
   arxiv:
@@ -88,10 +86,11 @@ source:
 
 llm:
   api:
-    key: "sk-xxx"                   # OpenRouter key
+    key: "sk-or-..."               # OpenRouter API key
     base_url: "https://openrouter.ai/api/v1"
   generation_kwargs:
-    model: "gpt-5.6-luna"           # recommended model
+    model: "openai/gpt-5.6-luna"   # recommended agent model
+  language: English                # digest language: English | Chinese
   harness:
     enabled: true
     top_k: 100
@@ -102,128 +101,131 @@ email:
   sender: "you@example.com"
   receiver: "you@outlook.com"
   smtp_server: "smtp.example.com"
-  smtp_port: 587
+  smtp_port: 465
   sender_password: "your-smtp-password"
+
+executor:
+  source: ["arxiv"]
+  reranker: api                    # 'api' (OpenAI-compatible) or 'local'
+  max_paper_num: 10
 ```
 
-See [`config/base.yaml`](config/base.yaml) for all options.
+All options are documented in [`config/base.yaml`](config/base.yaml).
 
-### 4. Run Locally (Debug)
+### 4. Run locally (debug)
 
 ```bash
 python -m zotero_arxiv_daily.executor --debug
 ```
 
-Check the generated email in `.cache/debug_email.html`.
+Inspect the rendered email at `.cache/last_email.html` — no sending in debug mode.
 
 ### 5. Deploy on GitHub Actions
 
-1. Push your fork to GitHub
-2. Go to **Settings → Secrets and variables → Actions**
-3. Add these secrets:
-   - `ZOTERO_USER_ID`
-   - `ZOTERO_API_KEY`
-   - `LLM_API_KEY`
-   - `EMAIL_SENDER`
-   - `EMAIL_RECEIVER`
-   - `SMTP_SERVER`
-   - `SMTP_PORT`
-   - `SENDER_PASSWORD`
-4. Enable the workflow: **Actions → Select workflow → Enable workflow**
+1. Push your fork to GitHub.
+2. **Settings → Secrets and variables → Actions**, add:
+   - `ZOTERO_ID`, `ZOTERO_KEY`
+   - `OPENAI_API_KEY`, `OPENAI_API_BASE`
+   - `SENDER`, `RECEIVER`, `SENDER_PASSWORD`
+3. Optionally set a **variable** `CUSTOM_CONFIG` (raw YAML merged over the defaults) — useful for tweaking categories, language or recipient lists without touching code.
+4. The workflow runs **daily at 22:00 UTC** (adjust the cron in `.github/workflows/main.yml`). Trigger it manually anytime with *Actions → Send emails daily → Run workflow*.
 
-The action runs daily at 09:00 UTC (adjustable in `.github/workflows/digest.yml`).
+---
 
 ## 🏗 Architecture
 
 ```
-┌─────────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Zotero Library      │     │  arXiv RSS/API   │     │  Corpus Cache   │
-│  (CorpusPaper[])     │     │  (RawPaperItem[])│     │  (.cache/)      │
-└─────────┬───────────┘     └────────┬─────────┘     └────────┬────────┘
-          │                          │                        │
-          ▼                          ▼                        │
-    ┌─────────────┐          ┌──────────────┐                │
-    │ build_profile│         │ retrieve     │                │
-    │  (cached)    │         │ papers       │                │
-    └──────┬──────┘          └──────┬───────┘                │
-           │                       │                         │
-           │                       ▼                         │
-           │                 ┌──────────────┐               │
-           │                 │ rerank       │               │
-           │                 │ (BM25+vec)   │               │
-           │                 └──────┬───────┘               │
-           │                        │                        │
-           │                        ▼                        │
-           │                 ┌──────────────┐               │
-           │                 │ filter       │               │
-           │                 │ (score/kw)   │               │
-           │                 └──────┬───────┘               │
-           │                        │                        │
-           │                        ▼                        │
-           │                 ┌──────────────────┐           │
-           │                 │ HarnessAgent     │◄──────────┘
-           │                 │  · inspect_...   │
-           │                 │  · submit_digest │
-           │                 └──────┬───────────┘
-           │                        │ Digest
-           ▼                        ▼
-    ┌──────────────────────────────────────┐
-    │  construct_email                     │
-    │  (safe HTML render + LaTeX→Unicode)  │
-    └──────────────┬───────────────────────┘
-                   │
-                   ▼
-            ┌─────────────┐
-            │ notify      │
-            │ (email/webhook)│
-            └─────────────┘
+┌──────────────────┐      ┌───────────────────┐      ┌─────────────────┐
+│   Zotero Library  │      │  arXiv/bioRxiv/   │      │  .cache/        │
+│  (CorpusPaper[])  │      │  medRxiv feeds    │      │  (embeddings,   │
+└────────┬─────────┘      └─────────┬─────────┘      │   sent-history) │
+         │                          │                └────────┬────────┘
+         ▼                          ▼                         │
+   build_profile              retrieve_papers                │
+   (LLM-distilled,       ┌───────┴────────┐                  │
+    cached by hash)      │  rerank (BM25  │                  │
+         │               │  + embeddings) │                  │
+         │               └───────┬────────┘                  │
+         │                       ▼                           │
+         │                 filter (min_score /              │
+         │                 keywords / sent-history)          │
+         │                       │                           │
+         │                       ▼                           │
+         │            ┌──────────────────────┐               │
+         │            │     HarnessAgent      │◄─────────────┘
+         │            │  inspect_candidates   │   candidate list
+         │            │  inspect_paper        │   + embedding scores
+         │            │  submit_digest        │
+         │            └──────────┬───────────┘
+         │                       │  Digest (typed JSON)
+         ▼                       ▼
+   ┌──────────────────────────────────────┐
+   │   construct_email (safe HTML render) │
+   └──────────────────┬───────────────────┘
+                      ▼
+            ┌──────────────────┐
+            │  notifiers       │
+            │  email / webhook │
+            └──────────────────┘
 ```
+
+**Key idea:** the pipeline feeds the agent cheap signals (vector order, abstracts); every *editorial* decision — what to recommend, how to phrase each reason, how to structure the mail — belongs to the agent.
+
+---
 
 ## 📂 Project Structure
 
 ```
 src/zotero_arxiv_daily/
 ├── protocol.py          # Data classes: Paper, CorpusPaper, RawPaperItem
-├── harness.py           # HarnessAgent: single agent loop + tools + Digest
+├── harness.py           # HarnessAgent: agent loop + tools + Digest + fallback
 ├── construct_email.py   # Safe HTML renderer: Digest → email HTML
-├── executor.py          # Pipeline orchestrator: fetch → rerank → agent → deliver
-├── retriever/           # Source-specific retrievers (arXiv, bioRxiv, medRxiv)
+├── executor.py          # Orchestrator: fetch → rerank → agent → deliver
+├── retriever/           # arXiv, bioRxiv, medRxiv retrievers
 ├── reranker/            # Hybrid reranker (BM25 + embeddings, local or API)
-└── notifier/            # Delivery plugins (email, webhook)
+└── notifier.py          # Delivery plugins (email, webhook)
 
 config/
-├── base.yaml            # Full config schema (copy to local.yaml)
-└── default.yaml         # Hydra defaults
+├── base.yaml            # Full config schema
+└── custom.yaml          # Your overrides (gitignored by default)
 
-tests/                   # pytest suite (150 tests, ruff-clean)
-.github/workflows/       # GitHub Actions CI/CD
+tests/                   # 160+ tests, ruff-clean
+.github/workflows/       # CI + daily digest + keep-alive
 ```
+
+---
 
 ## 🧪 Testing
 
 ```bash
-pytest          # 150 tests
-ruff check .    # linting
+uv run pytest        # 160+ tests, ~89% coverage
+uvx ruff check src/ tests/
 ```
 
-All tests pass with Python 3.13+.
+Supports Python 3.13+.
+
+---
 
 ## 🔧 Configuration Reference
 
 | Section | Key | Description |
 |---------|-----|-------------|
-| `zotero` | `user_id`, `api_key` | Your Zotero account credentials |
-| `source.arxiv` | `category` | arXiv categories to monitor |
+| `zotero` | `user_id`, `api_key` | Zotero account credentials |
+| `source.arxiv` | `category`, `fallback_days` | arXiv categories; API fallback when RSS is empty (weekends) |
+| `source.biorxiv` / `source.medrxiv` | `category` | bioRxiv / medRxiv categories |
 | `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
-| `llm.generation_kwargs` | `model` | Model name (e.g. `gpt-5.6-luna`) |
-| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps` | Agent configuration |
-| `reranker` | `local` / `api` | Embedding reranker choice |
-| `email` | `sender`, `receiver`, `receivers`, `smtp_*` | SMTP delivery settings |
-| `executor` | `source`, `reranker`, `debug`, `send_empty`, `notifiers` | Pipeline control |
+| `llm.generation_kwargs` | `model`, `max_tokens` | Agent model + generation settings |
+| `llm.language` | `English` / `Chinese` | Digest language (labels + agent output) |
+| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps` | Agent loop tuning |
+| `reranker` | `local` / `api` | Embedding backend (model, batch_size, cache) |
+| `email` | `sender`, `receiver`, `receivers`, `smtp_*` | SMTP delivery |
+| `executor` | `source`, `reranker`, `max_paper_num`, `min_score`, `keywords_*`, `dedupe_history`, `notifiers` | Pipeline control |
+
+---
 
 ## 🙏 Credits
 
-This project is a complete rewrite of [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily), introducing a single HarnessAgent architecture inspired by Claude Code, Codex, and OpenClaw agent patterns.
+This project is a complete rewrite of [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily), rebuilt around a single HarnessAgent architecture inspired by Claude Code, Codex and OpenClaw agent patterns. Many thanks to the original author.
 
 ## 📄 License
 

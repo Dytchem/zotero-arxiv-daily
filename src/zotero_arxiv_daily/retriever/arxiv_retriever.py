@@ -2,7 +2,7 @@ import multiprocessing
 import os
 import re
 from collections.abc import Callable
-from datetime import UTC
+from datetime import UTC, datetime
 from queue import Empty
 from tempfile import TemporaryDirectory
 from typing import Any, TypeVar
@@ -134,6 +134,14 @@ def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
     to list the day's new papers. PDF/source URLs are derived from the ID.
     """
     paper_id = _extract_arxiv_id(entry.id)
+    # feedparser exposes published/updated as struct_time; normalise to UTC.
+    # Entries are FeedParserDict (a dict subclass), so use .get(), not getattr.
+    published = None
+    for key in ("published_parsed", "updated_parsed"):
+        parsed = entry.get(key)
+        if parsed:
+            published = datetime(*parsed[:6], tzinfo=UTC)
+            break
     return {
         "paper_id": paper_id,
         "title": entry.title,
@@ -142,6 +150,7 @@ def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
         "url": entry.get("link") or f"https://arxiv.org/abs/{paper_id}",
         "pdf_url": f"https://arxiv.org/pdf/{paper_id}",
         "source_url": f"https://arxiv.org/e-print/{paper_id}",
+        "published": published,
     }
 
 
@@ -171,6 +180,7 @@ class ArxivRetriever(BaseRetriever):
 
     def _retrieve_raw_papers(self) -> list[dict[str, Any]]:
         include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
+        lookback_days = int(self.config.source.arxiv.get("lookback_days", 2) or 2)
         # The RSS atom feed is arXiv's lightweight, rate-limit-free way to get
         # the day's new submissions (official recommendation for this use case).
         # Fetch each category as its own feed: a single `+`-joined query is
@@ -195,6 +205,18 @@ class ArxivRetriever(BaseRetriever):
                 f"arXiv RSS returned {total_entries} entries across categories — the feed may be "
                 f"truncated. Consider splitting categories or raising include_cross_list."
             )
+        # Keep only papers from the last N days (yesterday + today by default)
+        # so a missed run still catches the previous day's batch, while the
+        # sent-history dedupe below removes anything already shown.
+        if raw_papers and lookback_days > 0:
+            from datetime import timedelta
+
+            cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+            before = len(raw_papers)
+            raw_papers = [p for p in raw_papers if (p.get("published") or cutoff) >= cutoff]
+            dropped = before - len(raw_papers)
+            if dropped:
+                logger.info(f"arXiv: dropped {dropped} papers older than {lookback_days} day(s)")
         # Weekends/holidays: arXiv publishes nothing, so the RSS feed is empty.
         # When configured, fall back to the export API for the last N days
         # (submittedDate range query) so the daily digest still has content.

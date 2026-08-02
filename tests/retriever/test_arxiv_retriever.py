@@ -282,3 +282,25 @@ def test_arxiv_retriever_no_fallback_when_rss_has_papers(config, mock_feedparser
     retriever = ArxivRetriever(config)
     retriever.retrieve_papers()
     assert called_api == []
+
+
+def test_arxiv_retriever_lookback_filters_old_papers(config, mock_feedparser, monkeypatch):
+    """Papers older than lookback_days are dropped; recent ones are kept."""
+    from datetime import UTC, datetime, timedelta
+
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    # Only announce_type=new entries pass the announce filter; in the fixture
+    # those are the last two entries. Push one of them into the past.
+    entries = [e for e in mock_feedparser.entries if e.get("arxiv_announce_type", "new") == "new"]
+    assert len(entries) == 2
+    old = datetime.now(UTC) - timedelta(days=10)
+    entries[0]["published_parsed"] = old.timetuple()[:6]
+    entries[0]["updated_parsed"] = old.timetuple()[:6]
+    entries[1]["published_parsed"] = datetime.now(UTC).timetuple()[:6]
+    entries[1]["updated_parsed"] = datetime.now(UTC).timetuple()[:6]
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    assert len(papers) == 1
+    assert papers[0].title == entries[1]["title"]

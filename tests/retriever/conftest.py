@@ -14,6 +14,18 @@ def mock_feedparser(monkeypatch):
     Returns the parsed result so tests can assert against it.
     """
     parsed = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
+    # The fixture XML carries static dates (2025-08-20). Rewrite each entry's
+    # published/updated timestamps to *now* so the lookback_days window filter
+    # keeps them (the retriever only keeps papers from the last N days).
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    for i, entry in enumerate(parsed.entries):
+        stamp = (now - timedelta(hours=2 + i)).timetuple()[:6]
+        entry["published_parsed"] = stamp
+        entry["updated_parsed"] = stamp
+        entry["published"] = datetime(*stamp, tzinfo=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entry["updated"] = entry["published"]
     raw_parse = feedparser.parse
 
     def _patched(url_or_bytes, *args, **kwargs):

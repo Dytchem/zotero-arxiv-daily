@@ -92,6 +92,24 @@ def test_render_email_chinese_summary_and_others():
     assert "Other candidates" not in html
 
 
+def test_render_email_date_not_duplicated_when_subject_has_it():
+    """When the agent's subject already contains a date, the summary line does
+    not repeat it (avoids '2026-08-02 ... · 2026-08-02 · 精选 N 篇论文')."""
+    digest = Digest(subject="Quantum digest | 2026-08-02", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "精选 1 篇论文" in html
+    # the summary line must not repeat the date the subject already carries
+    assert "(Sunday) · 精选" not in html
+    assert "2026-08-02 (Sunday) · 精选" not in html
+
+
+def test_render_email_date_added_when_subject_lacks_it():
+    digest = Digest(subject="Quantum digest", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "2026-08-02" in html  # date appears in the summary line
+    assert "精选 1 篇论文" in html
+
+
 def test_render_fallback_chinese_summary():
     html = render_fallback([_paper(0)], language="Chinese")
     assert "共 1 篇论文" in html

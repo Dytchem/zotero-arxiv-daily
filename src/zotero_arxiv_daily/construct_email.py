@@ -264,10 +264,15 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
 
     title = _safe(_mathify(digest.subject)) or "Daily paper digest"
     today = _today_str()
+    # Avoid a duplicated date: the agent's subject often already carries one
+    # (e.g. "... | 2026-08-02"). Only add the date to the summary line when
+    # the subject does not contain it.
+    subject_has_date = bool(re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}", title))
     if language.lower().startswith("chinese"):
-        summary = f"{today} · 精选 {len(digest.papers)} 篇论文"
+        summary = (f"{today} · " if not subject_has_date else "") + f"精选 {len(digest.papers)} 篇论文"
     else:
-        summary = f"{today} · {len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+        n_label = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+        summary = (f"{today} · " if not subject_has_date else "") + n_label
     intro = _safe(_mathify(digest.intro))
     outro = _safe(_mathify(digest.outro))
 

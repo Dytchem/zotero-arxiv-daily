@@ -133,7 +133,7 @@ def _rate_html(score: float | None) -> str:
     )
 
 
-def _get_block_html(title, authors, reason, tldr, url, pdf_url, source) -> str:
+def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None) -> str:
     title_text = _mathify(title)
     title_html = title_text
     clean_url = _clean_link(url)
@@ -149,17 +149,17 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source) -> str:
             f'margin-bottom:6px;">{_safe(label)}</span>'
         )
 
-    reason_html = ""
+    # One note per card: prefer the agent's Why (recommendation reason);
+    # fall back to the TLDR when no reason is given. Never show both.
+    note_html = ""
     if reason:
-        reason_html = (
+        note_html = (
             f'<div style="margin-top:10px;font-size:13px;color:#6d28d9;'
             f'background:#faf5ff;border-left:4px solid #a855f7;padding:8px 12px;'
             f'border-radius:6px;"><strong>Why:</strong> {_safe(reason)}</div>'
         )
-
-    tldr_html = ""
-    if tldr:
-        tldr_html = (
+    elif tldr:
+        note_html = (
             f'<div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;'
             f'background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">'
             f'<strong>TLDR:</strong> {_safe(tldr)}</div>'
@@ -186,12 +186,33 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source) -> str:
       {badge_html}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
       <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>
-      <div style="margin-top:10px;">{_rate_html(None)}</div>
-      {reason_html}
-      {tldr_html}
+      <div style="margin-top:10px;">{_rate_html(score)}</div>
+      {note_html}
       <div style="margin-top:14px;">{buttons}</div>
     </div>
     """
+
+
+def _others_block_html(papers: list[Paper]) -> str:
+    """Compact list of candidates the agent did not pick (bottom of the email)."""
+    rows = ""
+    for p in papers:
+        title_text = _safe(_mathify(p.title))
+        clean_url = _clean_link(p.url)
+        link = f'<a href="{clean_url}" style="color:#111827;text-decoration:none;">{title_text}</a>' if clean_url else title_text
+        badge = ""
+        if p.source:
+            label = _SOURCE_LABELS.get(p.source, p.source)
+            badge = f'<span style="background:#eef2ff;color:#4f46e5;font-size:10px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:8px;">{_safe(label)}</span>'
+        rows += (
+            f'<div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;line-height:1.4;">'
+            f'{link}{badge}</div>'
+        )
+    return (
+        f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'
+        f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">Other candidates</div>'
+        f'{rows}</div>'
+    )
 
 
 def render_email(digest: Digest | None, originals: list[Paper] | None = None) -> str:
@@ -209,6 +230,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None) ->
     outro = _safe(_mathify(digest.outro))
 
     cards = ""
+    selected_indices: set[int] = set()
     if digest.papers:
         # Map candidate index -> original Paper so we can pull authors/url/pdf/source.
         originals_by_index = dict(enumerate(originals or []))
@@ -225,11 +247,21 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None) ->
                 url=(paper.url if paper else None),
                 pdf_url=(paper.pdf_url if paper else None),
                 source=(paper.source if paper else None),
+                score=(paper.score if paper else None),
             )
+            selected_indices.add(dp.index)
     else:
         cards = get_empty_html()
 
-    content = cards
+    # Remaining candidates (not picked by the agent) go at the bottom as a
+    # compact, no-frills list — still visible, but not editorialised.
+    others_html = ""
+    if originals:
+        others = [p for i, p in enumerate(originals) if i not in selected_indices]
+        if others:
+            others_html = _others_block_html(others)
+
+    content = cards + others_html
     html = framework.replace("__TITLE__", title)
     html = html.replace("__SUMMARY__", summary)
     html = html.replace("__INTRO__", f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "")
@@ -254,6 +286,7 @@ def render_fallback(papers: list[Paper]) -> str:
             url=p.url,
             pdf_url=p.pdf_url,
             source=p.source,
+            score=p.score,
         )
     return framework.replace("__TITLE__", "Daily paper digest").replace(
         "__SUMMARY__", f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"

@@ -38,8 +38,48 @@ def test_render_email_with_digest():
     assert "Here are my recommendations." in html
     assert "Sample Paper Title" in html
     assert "Direct hit" in html
-    assert "A great paper." in html
     assert "Enjoy!" in html
+
+
+def test_render_email_shows_relevance_score():
+    """The Relevance badge shows the real embedding score, not n/a."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0, score=7.5)])
+    assert "Relevance: 7.5" in html
+    assert "Relevance: n/a" not in html
+
+
+def test_render_email_relevance_none_is_defensive():
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0, score=None)])
+    assert "Relevance: n/a" in html
+
+
+def test_render_email_note_only_one():
+    """When both reason and tldr are present, only the Why note is shown."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="Direct hit", tldr="A great paper.")],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)])
+    assert "Direct hit" in html
+    assert "A great paper." not in html
+
+
+def test_render_email_others_section_lists_unpicked_candidates():
+    """Candidates the agent did not pick still appear at the bottom, compact."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    originals = [
+        _paper(0, title="Picked Paper"),
+        _paper(1, title="Not Picked One"),
+        _paper(2, title="Not Picked Two"),
+    ]
+    html = render_email(digest, originals=originals)
+    assert "Picked Paper" in html
+    assert "Other candidates" in html
+    assert "Not Picked One" in html
+    assert "Not Picked Two" in html
 
 
 def test_render_email_empty_digest():

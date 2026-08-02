@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import zotero_arxiv_daily.retriever.arxiv_retriever as arxiv_retriever
 from zotero_arxiv_daily.retriever.arxiv_retriever import (
     ArxivRetriever,
+    _extract_arxiv_id,
     _parse_abstract,
     _parse_authors,
-    _extract_arxiv_id,
     _rss_entry_to_paper,
     _run_with_hard_timeout,
 )

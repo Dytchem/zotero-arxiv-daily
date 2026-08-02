@@ -46,6 +46,9 @@
 | **Tool-use loop** | Real OpenAI function-calling cycle: `inspect_candidates`, `inspect_paper`, `submit_digest` — not per-paper scoring |
 | **Structured digest** | Agent submits a typed `Digest` object (subject / intro / papers / outro); render layer trusts only the structure, never raw LLM text |
 | **Safe HTML rendering** | All text fields are HTML-escaped; inline LaTeX is converted to Unicode (`$\\alpha$` → `α`); links are sanitised to http(s) only |
+| **Mail-client hardening** | CJK font stack, Outlook-safe solid-color buttons, responsive `@media` rules, hidden preheader, relevance-desc ordering |
+| **Localised UI** | `llm.language` switches labels (相关度/推荐理由/其他候选 vs Relevance/Why/Other candidates) |
+| **Email archive** | Every run writes `cache_dir/last_email.html`, uploaded as a `last-email` CI artifact for review |
 | **Graceful fallback** | If the agent fails, the pipeline falls back to embedding-ordered cards with simplified emails — you always get something |
 | **Multi-source** | arXiv, bioRxiv, medRxiv with cross-list support |
 | **Hybrid reranking** | BM25 + vector similarity (local or API-based embeddings) |

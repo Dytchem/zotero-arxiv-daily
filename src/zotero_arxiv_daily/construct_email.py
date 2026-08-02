@@ -166,8 +166,8 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
     note_html = ""
     if reason:
         note_html = (
-            f'<div style="margin-top:10px;font-size:13px;color:#6d28d9;'
-            f'background:#faf5ff;border-left:4px solid #a855f7;padding:8px 12px;'
+            f'<div style="margin-top:10px;font-size:13px;color:#4c1d95;'
+            f'background:#f5f3ff;border-left:4px solid #a855f7;padding:10px 16px;'
             f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(reason)}</div>'
         )
     elif tldr:
@@ -184,12 +184,12 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
         buttons += (
             f'<td style="width:50%;padding-right:4px;"><a href="{clean_pdf}" class="btn" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;font-size:13px;'
             f'font-weight:700;color:#ffffff;background-color:#2563eb;background-image:linear-gradient(135deg,#2563eb,#4f46e5);'
-            f'padding:9px 0;border-radius:8px;">PDF</a></td>'
+            f'padding:11px 0;border-radius:8px;">PDF</a></td>'
         )
     if clean_url:
         buttons += (
             f'<td style="width:50%;padding-left:4px;"><a href="{clean_url}" class="btn" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;font-size:13px;'
-            f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 0;'
+            f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:10px 0;'
             f'border-radius:8px;">Abstract</a></td>'
         )
 
@@ -200,7 +200,7 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
         )
 
     return f"""
-    <div class="card" style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
+    <div class="card" style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:24px;background:#ffffff;">
       {badge_html}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
       <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>

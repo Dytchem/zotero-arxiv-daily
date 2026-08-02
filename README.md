@@ -47,7 +47,8 @@
 | 🌐 **Localised UI** | Labels switch with `llm.language` (Chinese: 相关度/推荐理由/其他候选 · English: Relevance/Why/Other candidates) |
 | 🪂 **Graceful fallback** | If the agent fails, you still get an embedding-ordered digest — the email always goes out |
 | 📦 **Email archive** | Every run saves `cache_dir/last_email.html` and uploads it as a CI artifact for review |
-| 📚 **Multi-source** | arXiv (with weekend API fallback), bioRxiv, medRxiv, cross-list support |
+| 📚 **Multi-source** | arXiv (with lookback window + weekend API fallback), bioRxiv, medRxiv, cross-list support |
+| 📅 **Gap-free lookback** | `lookback_days` (default 2) keeps yesterday + today — a missed run never loses the previous day's papers |
 | 🎯 **Hybrid reranking** | BM25 + vector similarity, local or API embeddings |
 | 🔍 **Keyword filters** | Include/exclude papers by title/abstract substrings |
 | 🚫 **Sent-history dedupe** | Papers already emailed are never re-sent |
@@ -116,10 +117,10 @@ All options are documented in [`config/base.yaml`](config/base.yaml).
 ### 4. Run locally (debug)
 
 ```bash
-python -m zotero_arxiv_daily.executor --debug
+DEBUG=true uv run src/zotero_arxiv_daily/main.py
 ```
 
-Inspect the rendered email at `.cache/last_email.html` — no sending in debug mode.
+Inspect the rendered email at `.cache/last_email.html` — debug mode skips sending.
 
 ### 5. Deploy on GitHub Actions
 
@@ -199,7 +200,7 @@ config/
 ├── base.yaml            # Full config schema
 └── custom.yaml          # Your overrides (gitignored by default)
 
-tests/                   # 160+ tests, ruff-clean
+tests/                   # 170+ tests, ruff-clean
 .github/workflows/       # CI + daily digest + keep-alive
 ```
 
@@ -208,7 +209,7 @@ tests/                   # 160+ tests, ruff-clean
 ## 🧪 Testing
 
 ```bash
-uv run pytest        # 160+ tests, ~89% coverage
+uv run pytest        # 170+ tests, ~89% coverage
 uvx ruff check src/ tests/
 ```
 
@@ -221,15 +222,15 @@ Supports Python 3.13+.
 | Section | Key | Description |
 |---------|-----|-------------|
 | `zotero` | `user_id`, `api_key` | Zotero account credentials |
-| `source.arxiv` | `category`, `fallback_days` | arXiv categories; API fallback when RSS is empty (weekends) |
+| `source.arxiv` | `category`, `include_cross_list`, `lookback_days`, `fallback_days` | arXiv categories; keep last N days (gap-free); API fallback when RSS is empty (weekends) |
 | `source.biorxiv` / `source.medrxiv` | `category` | bioRxiv / medRxiv categories |
 | `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
 | `llm.generation_kwargs` | `model`, `max_tokens` | Agent model + generation settings |
 | `llm.language` | `English` / `Chinese` | Digest language (labels + agent output) |
-| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps` | Agent loop tuning |
+| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps`, `min_inspections`, `max_revisions`, `evaluator_enabled` | Agent loop tuning (candidate cap, full-text prefetch, submit gate, evaluator rounds) |
 | `reranker` | `local` / `api` | Embedding backend (model, batch_size, cache) |
-| `email` | `sender`, `receiver`, `receivers`, `smtp_*` | SMTP delivery |
-| `executor` | `source`, `reranker`, `max_paper_num`, `min_score`, `keywords_*`, `dedupe_history`, `notifiers` | Pipeline control |
+| `email` | `sender`, `receiver`, `receivers`, `smtp_*` | SMTP delivery (plus extra Cc recipients) |
+| `executor` | `source`, `reranker`, `rerank_alpha`, `max_paper_num`, `min_score`, `keywords_*`, `dedupe_history`, `cache_dir`, `notifiers` | Pipeline control |
 
 ---
 

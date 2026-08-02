@@ -294,7 +294,7 @@ class Executor:
         We do this on a budget (top-N by embedding score) to avoid blowing up
         bandwidth on papers the agent will never look at. Failures are swallowed.
         """
-        budget = int(self.config.executor.get("harness", {}).get("full_text_budget", 10))
+        budget = int((self.config.llm.get("harness") or {}).get("full_text_budget", 10))
         if budget <= 0:
             return
         # Only prefetch papers the agent is most likely to inspect.
@@ -334,7 +334,7 @@ class Executor:
     ) -> None:
         try:
             report = {
-                "ts": _dt.datetime.utcnow().isoformat() + "Z",
+                "ts": _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z"),
                 "corpus": corpus,
                 "candidates": candidates,
                 "ranked": ranked,

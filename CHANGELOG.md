@@ -5,6 +5,14 @@ All notable changes to this project are documented here.
 ## [1.3.0] - 2026-08-02
 
 ### Added
+- **Lookback time window** (`source.arxiv.lookback_days`, default 2): the arXiv
+  retriever now keeps papers from the last N days (yesterday + today) instead
+  of only the same-day RSS batch, and the published date is preserved from the
+  feed. A missed/failed run no longer loses the previous day's papers — they
+  are picked up on the next run and deduped against sent history.
+- **API-fallback resilience**: the weekend arXiv API fallback now retries
+  transient fetch/parse failures (3 attempts, backoff) instead of silently
+  returning nothing on a 429 or a flaky response.
 - **Generator + Evaluator two-agent architecture** (docs/HARNESS.md): after the
   generator loop submits a draft, an independent evaluator with fresh context
   and no tools grades it (score 0-10, issues, verdict approve/revise). A
@@ -24,6 +32,30 @@ All notable changes to this project are documented here.
 - System prompt reworked into an explicit SURVEY → DEEP-DIVE → FOCUS → DECIDE
   → WRITE → SUBMIT workflow.
 - `llm.harness` gains `min_inspections`, `max_revisions`, `evaluator_enabled`.
+
+### Fixed
+- `executor` read `full_text_budget` from the wrong config path
+  (`executor.harness` instead of `llm.harness`) — the prefetch budget never
+  applied; it now reads the real `llm.harness.full_text_budget`.
+- `llm.harness.top_k` was read but never used — the agent now caps the
+  candidate window at `top_k` before exploring.
+- `datetime.utcnow()` deprecation in the run report replaced with
+  timezone-aware `datetime.now(UTC)`.
+- `config/custom.yaml` example was missing the `openai/` provider prefix, the
+  `lookback_days` / `fallback_days` source options and the harness
+  `min_inspections` / `max_revisions` / `evaluator_enabled` knobs — aligned
+  with the real deployment config.
+- CLAUDE.md claimed "no linter configured" while `pyproject.toml` ships a
+  `[tool.ruff]` block — corrected, and the architecture section now lists all
+  five agent tools plus the evaluator stage.
+- Redundant `_collect_receivers` duplicate in `notifier.py` removed (it now
+  imports the single implementation from `email_sender.py`).
+- README/README.zh-CN: local debug command was broken
+  (`python -m zotero_arxiv_daily.executor --debug` →
+  `DEBUG=true uv run src/zotero_arxiv_daily/main.py`), test counts refreshed
+  (170+), and the configuration reference table gained `lookback_days`,
+  `min_inspections`, `max_revisions`, `evaluator_enabled`, `receivers`,
+  `rerank_alpha` and friends.
 
 ## [1.2.0] - 2026-08-02
 

@@ -403,6 +403,11 @@ class HarnessAgent:
         """
         if self.client is None or not candidates:
             return None
+        # top_k caps how many candidates the agent may see (embedding order is
+        # a cheap hint; the agent explores within this window).
+        if self.top_k > 0 and len(candidates) > self.top_k:
+            logger.info(f"Capping candidates for the agent at top_k={self.top_k} (of {len(candidates)})")
+            candidates = candidates[: self.top_k]
         profile = self.build_profile(corpus)
         if profile is None:
             return None

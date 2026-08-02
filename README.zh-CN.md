@@ -47,7 +47,8 @@
 | 🌐 **界面本地化** | 标签随 `llm.language` 切换（中文：相关度/推荐理由/其他候选 · English：Relevance/Why/Other candidates） |
 | 🪂 **优雅降级** | 智能体故障时自动回退为按向量排序的简化邮件 —— 每天的邮件保证送达 |
 | 📦 **邮件存档** | 每次运行保存 `cache_dir/last_email.html` 并上传为 CI 产物，方便随时复查 |
-| 📚 **多数据源** | arXiv（含周末 API 兜底）、bioRxiv、medRxiv，支持交叉列表 |
+| 📚 **多数据源** | arXiv（含回溯窗口 + 周末 API 兜底）、bioRxiv、medRxiv，支持交叉列表 |
+| 📅 **无漏回溯** | `lookback_days`（默认 2）保留昨天+今天 —— 漏跑一天也不会丢前一天的论文 |
 | 🎯 **混合重排** | BM25 + 向量相似度，支持本地或 API 向量模型 |
 | 🔍 **关键词过滤** | 按标题/摘要子串包含/排除论文 |
 | 🚫 **历史去重** | 已推送过的论文绝不重复发送 |
@@ -116,7 +117,7 @@ executor:
 ### 4. 本地调试运行
 
 ```bash
-python -m zotero_arxiv_daily.executor --debug
+DEBUG=true uv run src/zotero_arxiv_daily/main.py
 ```
 
 渲染结果在 `.cache/last_email.html` —— 调试模式不会真的发信。
@@ -199,7 +200,7 @@ config/
 ├── base.yaml            # 完整配置模板
 └── custom.yaml          # 你的覆盖配置（默认已 gitignore）
 
-tests/                   # 160+ 测试，ruff 通过
+tests/                   # 170+ 个测试，ruff 通过
 .github/workflows/       # CI + 每日邮件 + keep-alive
 ```
 
@@ -208,7 +209,7 @@ tests/                   # 160+ 测试，ruff 通过
 ## 🧪 测试
 
 ```bash
-uv run pytest        # 160+ 测试，覆盖率约 89%
+uv run pytest        # 170+ 个测试，覆盖率约 89%
 uvx ruff check src/ tests/
 ```
 
@@ -221,15 +222,15 @@ uvx ruff check src/ tests/
 | 配置段 | 键 | 说明 |
 |--------|-----|------|
 | `zotero` | `user_id`、`api_key` | Zotero 账号凭据 |
-| `source.arxiv` | `category`、`fallback_days` | arXiv 分类；RSS 为空（周末）时用 API 兜底最近 N 天 |
+| `source.arxiv` | `category`、`include_cross_list`、`lookback_days`、`fallback_days` | arXiv 分类；保留最近 N 天（无漏）；RSS 为空（周末）时用 API 兜底最近 N 天 |
 | `source.biorxiv` / `source.medrxiv` | `category` | bioRxiv / medRxiv 分类 |
 | `llm.api` | `key`、`base_url` | LLM 服务商（推荐 OpenRouter） |
 | `llm.generation_kwargs` | `model`、`max_tokens` | 智能体模型与生成参数 |
 | `llm.language` | `English` / `Chinese` | 邮件语言（界面标签 + 智能体输出） |
-| `llm.harness` | `enabled`、`top_k`、`full_text_budget`、`max_steps` | 智能体循环调参 |
+| `llm.harness` | `enabled`、`top_k`、`full_text_budget`、`max_steps`、`min_inspections`、`max_revisions`、`evaluator_enabled` | 智能体循环调参（候选上限、全文预取、提交门禁、评审轮数） |
 | `reranker` | `local` / `api` | 向量后端（模型、批大小、缓存） |
 | `email` | `sender`、`receiver`、`receivers`、`smtp_*` | SMTP 发送配置 |
-| `executor` | `source`、`reranker`、`max_paper_num`、`min_score`、`keywords_*`、`dedupe_history`、`notifiers` | 流水线控制 |
+| `executor` | `source`、`reranker`、`rerank_alpha`、`max_paper_num`、`min_score`、`keywords_*`、`dedupe_history`、`cache_dir`、`notifiers` | 流水线控制 |
 
 ---
 

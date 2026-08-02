@@ -2,9 +2,10 @@ import multiprocessing
 import os
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from queue import Empty
 from tempfile import TemporaryDirectory
+from time import sleep
 from typing import Any, TypeVar
 
 import feedparser
@@ -209,8 +210,6 @@ class ArxivRetriever(BaseRetriever):
         # so a missed run still catches the previous day's batch, while the
         # sent-history dedupe below removes anything already shown.
         if raw_papers and lookback_days > 0:
-            from datetime import timedelta
-
             cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
             before = len(raw_papers)
             raw_papers = [p for p in raw_papers if (p.get("published") or cutoff) >= cutoff]
@@ -239,8 +238,6 @@ class ArxivRetriever(BaseRetriever):
 
     def _retrieve_from_api_fallback(self) -> list[dict[str, Any]]:
         """RSS empty (weekend/holiday) → pull the last N days via the export API."""
-        from datetime import datetime, timedelta
-
         days = int(self.config.source.arxiv.fallback_days)
         end = datetime.now(UTC)
         start = end - timedelta(days=days)
@@ -255,13 +252,43 @@ class ArxivRetriever(BaseRetriever):
                 f"search_query={query}&start=0&max_results=200"
                 f"&sortBy=submittedDate&sortOrder=descending"
             )
-            feed = feedparser.parse(url)
+            feed = self._fetch_feed_with_retry(url, category)
             for entry in feed.entries:
                 paper = _rss_entry_to_paper(entry)
                 # The API returns a plain arXiv id (no announce-type filtering);
                 # keep everything, dedupe happens in the caller.
                 raw_papers.append(paper)
         return raw_papers
+
+    @staticmethod
+    def _fetch_feed_with_retry(url: str, category: str, attempts: int = 3, base_delay: float = 3.0) -> Any:
+        """Parse an arXiv feed URL, retrying on transient HTTP/parse failures.
+
+        The export API rate-limits aggressively (HTTP 429); a short backoff
+        with a few attempts is enough to ride out a burst without making the
+        workflow hang.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                feed = feedparser.parse(url)
+                # feedparser reports HTTP errors as bozo_exception rather than
+                # raising; treat a non-OK bozo with no entries as failure.
+                # (getattr: some parsers/mocks return objects without bozo.)
+                if getattr(feed, "bozo", False) and not feed.entries and getattr(feed, "bozo_exception", None):
+                    raise RuntimeError(f"feedparser bozo: {feed.bozo_exception}")
+                return feed
+            except Exception as exc:
+                last_exc = exc
+                if attempt < attempts:
+                    delay = base_delay * attempt
+                    logger.warning(
+                        f"arXiv API fetch failed for {category} (attempt {attempt}/{attempts}): "
+                        f"{exc}; retrying in {delay}s"
+                    )
+                    sleep(delay)
+        logger.error(f"arXiv API fetch failed for {category} after {attempts} attempts: {last_exc}")
+        return feedparser.parse("")  # empty feed → caller sees no papers
 
     def convert_to_paper(self, raw_paper: dict[str, Any]) -> Paper:
         return Paper(

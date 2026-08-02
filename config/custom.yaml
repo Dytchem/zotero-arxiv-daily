@@ -15,12 +15,35 @@ llm:
     key: ${oc.env:OPENAI_API_KEY}
     base_url: ${oc.env:OPENAI_API_BASE}
   generation_kwargs:
-    model: gpt-5.6-luna
+    max_tokens: 16384
+    model: openai/gpt-5.6-luna
+  language: English
+  harness:
+    enabled: true
+    top_k: 100
+    full_text_budget: 10
+    max_steps: 12
+    min_inspections: 3
+    max_revisions: 2
+    evaluator_enabled: true
 
 source:
   arxiv:
     category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+    include_cross_list: false
+    lookback_days: 2
+    fallback_days: 7
 
 executor:
   debug: ${oc.env:DEBUG,null}
   source: ['arxiv']
+  reranker: api
+  max_paper_num: 10
+  send_empty: true
+
+reranker:
+  api:
+    key: ${oc.env:OPENAI_API_KEY}
+    base_url: ${oc.env:OPENAI_API_BASE}
+    model: qwen/qwen3-embedding-8b
+    batch_size: 64

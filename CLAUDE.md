@@ -25,7 +25,11 @@ uv run pytest tests/test_utils.py::TestGlobMatch -v
 uv sync
 ```
 
-No linter or formatter is configured.
+Linting is configured in `pyproject.toml` (`[tool.ruff]`, line-length 120, selected rules E/F/I/UP/B/SIM/C4/RUF):
+
+```bash
+uvx ruff check src/ tests/
+```
 
 ## Architecture
 
@@ -35,7 +39,8 @@ The pipeline feeds cheap signals to ONE agent; every editorial decision is the a
 2. **Filter corpus** — applies `include_path` / `ignore_path` glob patterns
 3. **Retrieve new papers** — fetches from configured sources (arXiv RSS + weekend API fallback, bioRxiv/medRxiv REST API)
 4. **Rerank** — embedding (+optional BM25 hybrid) similarity to corpus; this is a *hint* for the agent, not the final ranking
-5. **HarnessAgent digest** — `src/zotero_arxiv_daily/harness.py`: one agent loop with tools `inspect_candidates` / `inspect_paper` / `submit_digest`; produces a typed `Digest` (subject / intro / papers[DigestPaper] / outro). Single LLM provider (`llm.api`, e.g. OpenRouter `gpt-5.6-luna`). Falls back to embedding order on any failure.
+4. **Rerank** — embedding (+optional BM25 hybrid) similarity to corpus; this is a *hint* for the agent, not the final ranking. `top_k` caps how many candidates the agent sees
+5. **HarnessAgent digest** — `src/zotero_arxiv_daily/harness.py`: generator loop with tools `inspect_candidates` / `inspect_paper` / `search_candidates` / `compare_papers` / `submit_digest`, then an independent evaluator (fresh context, no tools) grades the draft (score / issues / approve|revise) and drives up to `max_revisions` improvement rounds; produces a typed `Digest` (subject / intro / papers[DigestPaper] / outro). Single LLM provider (`llm.api`, e.g. OpenRouter `gpt-5.6-luna`). Falls back to embedding order on any failure.
 6. **Render + send** — `construct_email.py` is a pure safe render layer (HTML-escape, LaTeX→Unicode, link whitelist, localised labels via `llm.language`); delivered via notifiers (email / webhook) with the agent's subject line
 
 ### Plugin Systems

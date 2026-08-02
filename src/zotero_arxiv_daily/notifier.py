@@ -87,7 +87,7 @@ class EmailNotifier(BaseNotifier):
 
     def send(self, html: str, subject: str | None = None) -> None:
         # Import here so tests patching smtplib only need to patch this module.
-        from .email_sender import send_email
+        from .email_sender import _collect_receivers, send_email
 
         send_email(self.config, html, subject=subject)
         logger.info(f"[notifier:email] sent to {_collect_receivers(self.config)}")
@@ -136,7 +136,12 @@ class WebhookNotifier(BaseNotifier):
 
 
 def _collect_receivers(config: DictConfig) -> list[str]:
-    """Primary recipient + optional extras, deduplicated, order kept."""
+    """Primary recipient + optional extras, deduplicated, order kept.
+
+    Kept here (mirroring :func:`email_sender._collect_receivers`) so the
+    webhook notifier and log lines can resolve recipients without importing
+    the SMTP module; the email notifier imports the SMTP implementation.
+    """
     primary = config.email.receiver
     extra = config.email.get("receivers") or []
     if isinstance(extra, str):

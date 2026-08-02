@@ -88,3 +88,44 @@ def test_run_with_hard_timeout_returns_none_on_failure(monkeypatch):
     )
     assert result is None
     assert "boom" in warnings[0]
+
+
+def test_fetch_full_text_tries_tar_then_html_then_pdf(config, monkeypatch):
+    """fetch_full_text falls back tar -> html -> pdf and returns first hit."""
+    from tests.canned_responses import make_sample_paper
+
+    calls: list[str] = []
+
+    def fake_tar(paper):
+        calls.append("tar")
+        return None
+
+    def fake_html(paper):
+        calls.append("html")
+        return None
+
+    def fake_pdf(paper):
+        calls.append("pdf")
+        return "pdf text"
+
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", fake_tar)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", fake_html)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", fake_pdf)
+
+    retriever = ArxivRetriever(config)
+    result = retriever.fetch_full_text(make_sample_paper())
+    assert result == "pdf text"
+    assert calls == ["tar", "html", "pdf"]
+
+
+def test_fetch_full_text_short_circuits_on_tar_hit(config, monkeypatch):
+    """fetch_full_text stops at the first successful extraction."""
+    from tests.canned_responses import make_sample_paper
+
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: "tar text")
+    monkeypatch.setattr(
+        arxiv_retriever, "extract_text_from_html",
+        lambda paper: (_ for _ in ()).throw(AssertionError("html should not be called")),
+    )
+    retriever = ArxivRetriever(config)
+    assert retriever.fetch_full_text(make_sample_paper()) == "tar text"

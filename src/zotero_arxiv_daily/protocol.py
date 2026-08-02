@@ -20,28 +20,45 @@ class Paper:
     tldr: Optional[str] = None
     affiliations: Optional[list[str]] = None
     score: Optional[float] = None
+    source_url: Optional[str] = None
 
     def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
         lang = llm_params.get('language', 'English')
-        prompt = f"Given the following information of a paper, generate a one-sentence TLDR summary in {lang}:\n\n"
+        intro = f"Given the following information of a paper, generate a one-sentence TLDR summary in {lang}:\n\n"
+        sections = []
         if self.title:
-            prompt += f"Title:\n {self.title}\n\n"
-
+            sections.append(f"Title:\n {self.title}\n\n")
         if self.abstract:
-            prompt += f"Abstract: {self.abstract}\n\n"
-
+            sections.append(f"Abstract: {self.abstract}\n\n")
         if self.full_text:
-            prompt += f"Preview of main content:\n {self.full_text}\n\n"
+            sections.append(f"Preview of main content:\n {self.full_text}\n\n")
 
         if not self.full_text and not self.abstract:
             logger.warning(f"Neither full text nor abstract is provided for {self.url}")
             return "Failed to generate TLDR. Neither full text nor abstract is provided"
-        
+
         # use gpt-4o tokenizer for estimation
         enc = tiktoken.encoding_for_model("gpt-4o")
-        prompt_tokens = enc.encode(prompt)
-        prompt_tokens = prompt_tokens[:4000]  # truncate to 4000 tokens
-        prompt = enc.decode(prompt_tokens)
+        max_tokens = 4000
+
+        # Keep the header (title + abstract) intact and cap only the full-text
+        # preview. Truncating from the start would drop the paper body that we
+        # paid to download.
+        header = intro + "".join(s for s in sections if not s.startswith("Preview"))
+        header_tokens = enc.encode(header)
+        budget = max_tokens - len(header_tokens)
+
+        if budget > 0 and self.full_text:
+            body_tokens = enc.encode(self.full_text)
+            if len(body_tokens) > budget:
+                self_body = enc.decode(body_tokens[:budget])
+            else:
+                self_body = self.full_text
+            prompt = header + f"Preview of main content:\n {self_body}\n\n"
+        else:
+            prompt = header
+        if len(enc.encode(prompt)) > max_tokens:
+            prompt = enc.decode(enc.encode(prompt)[:max_tokens])
         
         response = openai_client.chat.completions.create(
             messages=[

@@ -16,6 +16,8 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
 
       - name: Run script
         env:
@@ -32,3 +34,28 @@ jobs:
           echo "Use custom config: "
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py
+
+      - name: Send failure notification
+        if: failure()
+        env:
+          SENDER: ${{ secrets.SENDER }}
+          RECEIVER: ${{ secrets.RECEIVER }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+        run: |
+          python - <<'PYEOF'
+          import os, smtplib
+          from email.mime.text import MIMEText
+
+          sender = os.environ["SENDER"]
+          receiver = os.environ["RECEIVER"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          run_id = os.environ["GITHUB_RUN_ID"]
+          body = f"zotero-arxiv-daily workflow failed.\nRun: https://github.com/{repo}/actions/runs/{run_id}"
+          msg = MIMEText(body, "plain", "utf-8")
+          msg["Subject"] = "[zotero-arxiv-daily] workflow failed"
+          msg["From"] = sender
+          msg["To"] = receiver
+          with smtplib.SMTP_SSL("smtp.qq.com", 465) as s:
+              s.login(sender, os.environ["SENDER_PASSWORD"])
+              s.sendmail(sender, [receiver], msg.as_string())
+          PYEOF

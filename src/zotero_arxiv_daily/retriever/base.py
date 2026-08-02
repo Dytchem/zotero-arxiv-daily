@@ -21,6 +21,15 @@ class BaseRetriever(ABC):
     def convert_to_paper(self, raw_paper:RawPaperItem) -> Paper | None:
         pass
 
+    def fetch_full_text(self, paper: Paper) -> str | None:
+        """Fetch full text for a paper that made it past reranking.
+
+        Default: no full text available. Retrievers that can download papers
+        (e.g. arXiv source / HTML / PDF) should override this so expensive
+        downloads only happen for the papers that actually get recommended.
+        """
+        return None
+
     def retrieve_papers(self) -> list[Paper]:
         raw_papers = self._retrieve_raw_papers()
         logger.info("Processing papers...")

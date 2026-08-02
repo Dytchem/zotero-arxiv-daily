@@ -3,7 +3,7 @@ from pyzotero import zotero
 from omegaconf import DictConfig, ListConfig
 from .utils import glob_match
 from .retriever import get_retriever_cls
-from .protocol import CorpusPaper
+from .protocol import CorpusPaper, Paper
 import random
 from datetime import datetime
 from .reranker import get_reranker_cls
@@ -90,6 +90,36 @@ class Executor:
         return corpus
 
     
+    def _process_paper(self, paper: Paper) -> None:
+        """Fetch full text + generate TLDR/affiliations for a single paper."""
+        self._populate_full_text(paper)
+        paper.generate_tldr(self.openai_client, self.config.llm)
+        paper.generate_affiliations(self.openai_client, self.config.llm)
+
+    def _generate_summaries(self, reranked_papers: list[Paper]) -> None:
+        """Generate TLDR/affiliations concurrently (LLM API calls dominate runtime)."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if not reranked_papers:
+            return
+        max_workers = min(5, len(reranked_papers))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(self._process_paper, p) for p in reranked_papers]
+            for _ in tqdm(as_completed(futures), total=len(futures), desc="Generating summaries"):
+                pass
+
+    def _populate_full_text(self, paper: Paper) -> None:
+        """Fetch full text lazily — only for papers that made it past reranking."""
+        if paper.full_text is not None:
+            return
+        retriever = self.retrievers.get(paper.source)
+        if retriever is None:
+            return
+        try:
+            paper.full_text = retriever.fetch_full_text(paper)
+        except Exception as exc:
+            logger.warning(f"Failed to fetch full text for {paper.title}: {exc}")
+
     def run(self):
         corpus = self.fetch_zotero_corpus()
         corpus = self.filter_corpus(corpus)
@@ -112,9 +142,7 @@ class Executor:
             reranked_papers = self.reranker.rerank(all_papers, corpus)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
             logger.info("Generating TLDR and affiliations...")
-            for p in tqdm(reranked_papers):
-                p.generate_tldr(self.openai_client, self.config.llm)
-                p.generate_affiliations(self.openai_client, self.config.llm)
+            self._generate_summaries(reranked_papers)
         elif not self.config.executor.send_empty:
             logger.info("No new papers found. No email will be sent.")
             return

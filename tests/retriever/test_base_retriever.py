@@ -125,3 +125,13 @@ def test_get_retriever_cls_unknown():
     import pytest
     with pytest.raises(ValueError, match="not found"):
         get_retriever_cls("nonexistent_retriever_xyz")
+
+
+def test_fetch_full_text_default_none(config):
+    """BaseRetriever.fetch_full_text returns None by default (lazy full text)."""
+    from tests.canned_responses import make_sample_paper
+
+    with open_dict(config.source):
+        config.source.none_test = {}
+    retriever = NoneRetriever(config)
+    assert retriever.fetch_full_text(make_sample_paper()) is None

@@ -281,3 +281,56 @@ def test_run_no_papers_send_empty_true(config, monkeypatch):
     assert len(sent) == 1, "Email should be sent even with no papers when send_empty=true"
     _, _, body = sent[0]
     assert "text/html" in body
+
+
+def test_populate_full_text_skips_when_present(config, monkeypatch):
+    """_populate_full_text does not re-fetch when full_text already exists."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor(config)
+    fetched: list[str] = []
+
+    class FakeRetriever:
+        def fetch_full_text(self, paper):
+            fetched.append(paper.title)
+            return "fetched"
+
+    executor.retrievers["arxiv"] = FakeRetriever()
+    paper = make_sample_paper(full_text="already have")
+    executor._populate_full_text(paper)
+    assert fetched == []
+    assert paper.full_text == "already have"
+
+
+def test_populate_full_text_handles_failure(config, monkeypatch):
+    """_populate_full_text swallows fetch errors (TLDR falls back to abstract)."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor(config)
+
+    class BoomRetriever:
+        def fetch_full_text(self, paper):
+            raise RuntimeError("boom")
+
+    executor.retrievers["arxiv"] = BoomRetriever()
+    paper = make_sample_paper(full_text=None)
+    executor._populate_full_text(paper)  # must not raise
+    assert paper.full_text is None
+
+
+def test_generate_summaries_runs_all_papers(config, monkeypatch):
+    """Concurrent summary generation covers every paper."""
+    from tests.canned_responses import make_sample_paper, make_stub_openai_client
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor(config)
+    executor.openai_client = make_stub_openai_client()
+    monkeypatch.setattr(executor, "_populate_full_text", lambda p: None)
+
+    papers = [make_sample_paper(title=f"Concurrent Paper {i}") for i in range(3)]
+    executor._generate_summaries(papers)
+    for p in papers:
+        assert p.tldr is not None, p.title
+        assert p.affiliations is not None, p.title

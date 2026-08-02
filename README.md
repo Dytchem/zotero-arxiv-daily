@@ -32,7 +32,8 @@
 *Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
 
 ## ✨ Features
-- Totally free! All the calculation can be done in the Github Action runner locally within its quota (for public repo).
+- Nearly free: local reranking runs on the GitHub Action runner within its quota (public repos); TL;DR generation uses an LLM API (bring your own key).
+- Support API-based reranking (e.g. OpenRouter embeddings) instead of local models.
 - AI-generated TL;DR for you to quickly pick up target papers.
 - Affiliations of the paper are resolved and presented.
 - Links of PDF and code implementation (if any) presented in the e-mail.
@@ -146,9 +147,9 @@ reranker:
       task: retrieval
       prompt_name: document
   api:
-    key: null # API Key of your embedding model API. Example: sk-xxx
-    base_url: null # API URL of your embedding model API. Example: https://api.openai.com/v1
-    model: null # The model name of the embedding model. Example: text-embedding-3-large
+    key: null # API Key of your embedding model API. Example: sk-or-v1-xxx (OpenRouter)
+    base_url: null # API URL of your embedding model API. Example: https://openrouter.ai/api/v1
+    model: null # The model name of the embedding model. Example: qwen/qwen3-embedding-8b
     batch_size: null # The batch size for embedding API requests. Adjust to match your provider's limit. Example: 64
 
 executor:
@@ -199,7 +200,7 @@ Distributed under the AGPLv3 License. See `LICENSE` for detail.
 ## ❤️ Acknowledgement
 - [pyzotero](https://github.com/urschrei/pyzotero)
 - [arxiv](https://github.com/lukasschwab/arxiv.py)
-- [sentence_transformers](https://github.com/UKPLab/sentence-transformers)
+- [sentence_transformers](https://github.com/UKPLab/sentence-transformers) (only needed for the `local` reranker; install via `pip install .[local-reranker]` or `uv sync --extra local-reranker`)
 
 ## ☕ Buy Me A Coffee
 If you find this project helpful, welcome to sponsor me via WeChat or via [ko-fi](https://ko-fi.com/tidedra).

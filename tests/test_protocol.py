@@ -122,3 +122,28 @@ def test_affiliations_error_returns_none(llm_params):
     result = paper.generate_affiliations(broken_client, llm_params)
     assert result is None
     assert paper.affiliations is None
+
+
+def test_tldr_truncation_keeps_header(llm_params):
+    """Long full text is truncated from the body, title/abstract stay intact."""
+    from types import SimpleNamespace
+
+    from tests.canned_responses import _make_chat_response
+
+    seen: dict = {}
+
+    def recording_create(**kwargs):
+        seen["messages"] = kwargs["messages"]
+        return _make_chat_response("TLDR stub")
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=recording_create))
+    )
+    long_text = ("word " * 5000) + "UNIQUE_TRAILING_MARKER"
+    paper = make_sample_paper(full_text=long_text)
+    paper.generate_tldr(client, llm_params)
+
+    prompt = seen["messages"][1]["content"]
+    assert "Sample Paper Title" in prompt               # title kept
+    assert "UNIQUE_TRAILING_MARKER" not in prompt       # tail of body truncated
+    assert "Preview of main content" in prompt          # structure preserved

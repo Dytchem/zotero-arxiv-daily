@@ -161,11 +161,6 @@ class ArxivRetriever(BaseRetriever):
         authors = [a.name for a in raw_paper.authors]
         abstract = raw_paper.summary
         pdf_url = raw_paper.pdf_url
-        full_text = extract_text_from_tar(raw_paper)
-        if full_text is None:
-            full_text = extract_text_from_html(raw_paper)
-        if full_text is None:
-            full_text = extract_text_from_pdf(raw_paper)
         return Paper(
             source=self.name,
             title=title,
@@ -173,12 +168,21 @@ class ArxivRetriever(BaseRetriever):
             abstract=abstract,
             url=raw_paper.entry_id,
             pdf_url=pdf_url,
-            full_text=full_text,
+            source_url=raw_paper.source_url(),
         )
 
+    def fetch_full_text(self, paper: Paper) -> str | None:
+        """Fetch full text only for papers that made it past reranking."""
+        full_text = extract_text_from_tar(paper)
+        if full_text is None:
+            full_text = extract_text_from_html(paper)
+        if full_text is None:
+            full_text = extract_text_from_pdf(paper)
+        return full_text
 
-def extract_text_from_html(paper: ArxivResult) -> str | None:
-    html_url = paper.entry_id.replace("/abs/", "/html/")
+
+def extract_text_from_html(paper: Paper) -> str | None:
+    html_url = paper.url.replace("/abs/", "/html/")
     try:
         return _extract_text_from_html_worker(html_url)
     except Exception as exc:
@@ -186,7 +190,7 @@ def extract_text_from_html(paper: ArxivResult) -> str | None:
         return None
 
 
-def extract_text_from_pdf(paper: ArxivResult) -> str | None:
+def extract_text_from_pdf(paper: Paper) -> str | None:
     if paper.pdf_url is None:
         logger.warning(f"No PDF URL available for {paper.title}")
         return None
@@ -199,14 +203,13 @@ def extract_text_from_pdf(paper: ArxivResult) -> str | None:
     )
 
 
-def extract_text_from_tar(paper: ArxivResult) -> str | None:
-    source_url = paper.source_url()
-    if source_url is None:
+def extract_text_from_tar(paper: Paper) -> str | None:
+    if paper.source_url is None:
         logger.warning(f"No source URL available for {paper.title}")
         return None
     return _run_with_hard_timeout(
         _extract_text_from_tar_worker,
-        (source_url, paper.entry_id, paper.title),
+        (paper.source_url, paper.url, paper.title),
         timeout=TAR_EXTRACT_TIMEOUT,
         operation="Tar extraction",
         paper_title=paper.title,

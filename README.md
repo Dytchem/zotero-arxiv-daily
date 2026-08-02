@@ -12,264 +12,216 @@
   [![GitHub Issues](https://img.shields.io/github/issues/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/issues)
   [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/TideDra/zotero-arxiv-daily)](https://github.com/TideDra/zotero-arxiv-daily/pulls)
   [![License](https://img.shields.io/github/license/TideDra/zotero-arxiv-daily)](/LICENSE)
-  [<img src="https://api.gitsponsors.com/api/badge/img?id=893025857" height="20">](https://api.gitsponsors.com/api/badge/link?p=PKMtRut1dWWuC1oFdJweyDSvJg454/GkdIx4IinvBblaX2AY4rQ7FYKAK1ZjApoiNhYEeduIEhfeZVIwoIVlvcwdJXVFD2nV2EE5j6lYXaT/RHrcsQbFl3aKe1F3hliP26OMayXOoZVDidl05wj+yg==)
 
 </div>
 
 ---
 
-<p align="center"> Recommend new arxiv papers of your interest daily according to your Zotero library.
-    <br> 
-</p>
+<p align="center"> A HarnessAgent that reads your Zotero library, hunts arXiv daily, and writes a personalised paper digest — delivered to your inbox.</p>
 
 > [!IMPORTANT]
-> Please keep an eye on this repo, and merge your forked repo in time when there is any update of this upstream, in order to enjoy new features and fix found bugs.
+> Keep an eye on this repo. When the upstream updates, merge your fork to enjoy new features and bug fixes.
 
 ## 🇨🇳 中文简介
 
-**Zotero-arXiv-Daily** 每天根据你的 Zotero 文献库，从 arXiv / bioRxiv / medRxiv 自动检索
-与你研究兴趣相关的新论文，发送到你的邮箱📮。
+**Zotero-arXiv-Daily** 的核心是一个 **HarnessAgent**（类似 Claude Code / Codex 的自主 Agent）：
+它读取你的 Zotero 文献库建立研究画像，每天从 arXiv / bioRxiv / medRxiv 抓取新论文，
+经 embedding 粗筛后，agent 自主决定推荐哪些、为什么推，并生成完整邮件发到你邮箱📮。
 
-- **LLM Harness 智能推荐**：两阶段推荐——先由 embedding 粗筛候选，再让 LLM 像人一样
-  阅读你的文献库（研究主题、关键词、方法），对候选论文打分并给出**推荐理由**，
-  邮件里直接告诉你为什么推这篇
-- 支持本地嵌入模型或 API 重排序（混合 BM25 + 向量相似度）
-- 支持多收件人（`email.receivers`）与多渠道通知（邮件 / Webhook：Telegram、Server酱等）
-- 可配置 `min_score` 过滤低相关论文、关键词白/黑名单、跨源去重、历史去重
-- 零成本部署：Fork 仓库 + 配置 GitHub Action Secrets 即可每日自动运行
+- **单 Agent 架构**：一个 HarnessAgent 搞定全部 —— 蒸馏研究画像 → 审阅候选 → 撰写邮件全文
+- **工具调用循环**：真正的 while-loop + function calling（`inspect_candidates` / `inspect_paper` / `submit_digest`），不是每篇打分
+- **结构化输出**：agent 通过 `submit_digest` 提交结构化 JSON（subject / intro / papers[DigestPaper] / outro），渲染层绝不信任 LLM 原文
+- **安全渲染层**：HTML escape 所有文本字段，LaTeX 公式转 Unicode（`$\\alpha$` → `α`），链接只允许 http(s)
+- **优雅降级**：agent 失败 → 回退到 embedding 顺序 + 简化邮件，保证每日必有邮件
+- **多渠道通知**：邮件 / Webhook（Telegram、Server酱等）
+- **零成本部署**：Fork 仓库 + GitHub Action Secrets 即可每日自动运行
 
-完整使用方式见下文英文文档。
-
-## 🧐 About <a name = "about"></a>
-
-> Track new scientific researches of your interest by just forking (and staring) this repo!😊
-
-*Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
+基于 [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily)，感谢原作者的出色工作。
 
 ## ✨ Features
-- **LLM Harness smart recommendation** (new): two-stage rerank — embeddings narrow the candidate pool, then an LLM (own provider entry, e.g. `gpt-5.6-luna` via OpenRouter) reads a research profile distilled from your Zotero library, scores each paper and gives a one-line **recommendation reason** shown in the email.
-- Nearly free: local reranking runs on the GitHub Action runner within its quota (public repos); TL;DR generation uses an LLM API (bring your own key).
-- Three independent provider entries: `reranker.api` (embeddings), `llm.api` (TL;DR), `llm.harness.api` (recommendation reasoning) — each can point at its own provider/model.
-- Support API-based reranking (e.g. OpenRouter embeddings) instead of local models.
-- AI-generated TL;DR for you to quickly pick up target papers.
-- Affiliations of the paper are resolved and presented.
-- Links of PDF and code implementation (if any) presented in the e-mail.
-- List of papers sorted by relevance with your recent research interest.
-- Fast deployment via fork this repo and set environment variables in the Github Action Page.
-- Support LLM API for generating TL;DR of papers.
-- Ignore unwanted Zotero papers using a list of glob patterns.
-- Multiple recipients (`email.receivers`) and multiple delivery channels (email / webhook for Telegram, Server酱, 钉钉, Discord, Slack).
-- Relevance threshold (`min_score`), keyword allow/block lists, cross-source and cross-run dedupe.
-- Machine-readable run report (`last_run.json`) and resilient per-source failure handling.
-- Support multiple sources of papers to retrieve:
-  - arxiv
-  - biorxiv
-  - medrxiv
 
-## 📷 Screenshot
-![screenshot](./assets/screenshot.png)
+| Feature | Description |
+|---------|-------------|
+| **HarnessAgent** | Single autonomous agent that builds a research profile from your Zotero library, inspects candidates via tool calls, and writes the full digest |
+| **Tool-use loop** | Real OpenAI function-calling cycle: `inspect_candidates`, `inspect_paper`, `submit_digest` — not per-paper scoring |
+| **Structured digest** | Agent submits a typed `Digest` object (subject / intro / papers / outro); render layer trusts only the structure, never raw LLM text |
+| **Safe HTML rendering** | All text fields are HTML-escaped; inline LaTeX is converted to Unicode (`$\\alpha$` → `α`); links are sanitised to http(s) only |
+| **Graceful fallback** | If the agent fails, the pipeline falls back to embedding-ordered cards with simplified emails — you always get something |
+| **Multi-source** | arXiv, bioRxiv, medRxiv with cross-list support |
+| **Hybrid reranking** | BM25 + vector similarity (local or API-based embeddings) |
+| **Keyword filters** | Include/exclude by title/abstract substrings |
+| **Sent-history dedupe** | Skip papers already emailed in previous runs |
+| **Multi-recipient** | Send to multiple email addresses (`email.receivers`) |
+| **Webhook notifier** | Deliver digests via HTTP POST (Telegram bot, Server酱, etc.) |
+| **Zero-cost CI/CD** | Runs on GitHub Actions — no server needed |
 
-## 🚀 Usage
-### Quick Start
-1. Fork (and star😘) this repo.
-![fork](./assets/fork.png)
+## 🚀 Quick Start
 
-2. Set Github Action environment variables.
-![secrets](./assets/secrets.png)
+### 1. Fork & Clone
 
-Below are all the secrets you need to set. They are invisible to anyone including you once they are set, for security.
-
-| Key |Description | Example |
-| :---  | :---  | :--- |
-| ZOTERO_ID  | User ID of your Zotero account. **User ID is not your username, but a sequence of numbers**Get your ID from [here](https://www.zotero.org/settings/security). You can find it at the position shown in this [screenshot](https://github.com/TideDra/zotero-arxiv-daily/blob/main/assets/userid.png). | 12345678  |
-| ZOTERO_KEY | An Zotero API key with read access. Get a key from [here](https://www.zotero.org/settings/security).  | AB5tZ877P2j7Sm2Mragq041H   |
-| SENDER | The email account of the SMTP server that sends you email. | abc@qq.com |
-| SENDER_PASSWORD | The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this.   | abcdefghijklmn |
-| RECEIVER | The e-mail address that receives the paper list. | abc@outlook.com |
-| OPENAI_API_KEY | API Key when using the API to access LLMs. You can get FREE API for using advanced open source LLMs in [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm). | sk-xxx |
-| OPENAI_API_BASE | API URL when using the API to access LLMs. | https://api.siliconflow.cn/v1 |
-
-Then you should also set a public variable `CUSTOM_CONFIG` for your custom configuration.
-![vars](./assets/repo_var.png)
-![custom_config](./assets/config_var.png)
-Paste the following content into the value of `CUSTOM_CONFIG` variable:
-```yaml
-zotero:
-  user_id: ${oc.env:ZOTERO_ID}
-  api_key: ${oc.env:ZOTERO_KEY}
-  include_path: null # Or e.g. ["2026/survey/**", "2026/reading-group/**"]
-
-email:
-  sender: ${oc.env:SENDER}
-  receiver: ${oc.env:RECEIVER}
-  receivers: null # Optional extra recipients (Cc), e.g. ["friend@outlook.com", "team@example.com"]
-  smtp_server: smtp.qq.com
-  smtp_port: 465
-  sender_password: ${oc.env:SENDER_PASSWORD}
-
-llm:
-  api:
-    key: ${oc.env:OPENAI_API_KEY}
-    base_url: ${oc.env:OPENAI_API_BASE}
-  generation_kwargs:
-    model: gpt-4o-mini
-  harness:
-  # Optional LLM Harness — independent provider entry (do NOT reuse
-  # reranker.api / llm.api keys). Enables two-stage smart recommendation.
-    enabled: false # Set true to enable. Example: true
-    top_k: 100
-    batch_size: 25
-    api:
-      key: ${oc.env:OPENAI_API_KEY} # e.g. OpenRouter key
-      base_url: ${oc.env:OPENAI_API_BASE} # e.g. https://openrouter.ai/api/v1
-      model: gpt-5.6-luna # reasoning model for recommendation
-
-source:
-  arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
-    include_cross_list: false # Set to true to include arXiv cross-list papers in these categories.
-
-executor:
-  debug: ${oc.env:DEBUG,null}
-  source: ['arxiv']
-  # min_score: 0.5 # Optional: only keep papers with relevance score >= this (0-10). null keeps all.
-  # notifiers: ['email', 'webhook'] # Optional: fan out the digest to extra channels.
-```
-Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
->[!NOTE]
-> `${oc.env:XXX,yyy}` means the value of the environment variable `XXX`. If the variable is not set, the default value `yyy` will be used.
-
-Here is the full configuration, `???` means the value must be filled in:
-```yaml
-zotero:
-  user_id: ??? # User ID of your Zotero account.
-  api_key: ??? # An Zotero API key with read access.
-  include_path: null # A list of glob patterns marking the Zotero collections that should be included. Example: ["2026/survey/**", "2026/reading-group/**"]
-
-source:
-  arxiv:
-    category: null # The categories of target arxiv papers. Find the abbr of your research area from [here](https://arxiv.org/category_taxonomy). Example: ["cs.AI","cs.CV","cs.LG","cs.CL"]
-    include_cross_list: false # Whether to include arXiv cross-list papers in subscribed categories. Example: true
-  biorxiv:
-    category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
-  medrxiv:
-    category: null # The categories of target medrxiv papers. Find categories from [here](https://www.medrxiv.org/) Example: ["psychiatry and clinical psychology", "neurology"]
-
-email:
-  sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
-  receiver: ??? # The email account that receives the paper list. Example: abc@outlook.com
-  receivers: null # Optional list of extra recipients (Cc). Example: ["friend@outlook.com", "team@example.com"]
-  smtp_server: ??? # The SMTP server that sends the email. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server. Example: smtp.qq.com
-  smtp_port: ??? # The port of SMTP server. Example: 465
-  sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
-
-llm:
-  api:
-    key: ??? # API Key of your LLM API (TL;DR generation, e.g. Ollama). Example: sk-xxx
-    base_url: ??? # API URL of your LLM API. Example: http://localhost:11434/v1
-  generation_kwargs:
-  # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
-    max_tokens: 16384
-    model: ???
-  language: English # Preferred language for the TL;DR. Example: English
-  harness:
-  # LLM Harness — stage-2 smart recommendation (independent provider entry).
-  # Embeddings narrow the candidates, then this LLM scores them and writes
-  # a one-line recommendation reason per paper.
-    enabled: false # Set true to enable. Example: true
-    top_k: 100 # How many embedding-ranked candidates to score. Example: 100
-    batch_size: 25 # Candidates per scoring call. Example: 25
-    api:
-    # Fully independent entry — do not reuse reranker.api or llm.api keys.
-      key: null # API Key (e.g. OpenRouter). Example: sk-xxx
-      base_url: null # API URL. Example: https://openrouter.ai/api/v1
-      model: null # Reasoning model. Example: gpt-5.6-luna
-
-reranker:
-  local:
-    model: jinaai/jina-embeddings-v5-text-nano # The Hugging Face model name of the local embedding model. Example: jinaai/jina-embeddings-v5-text-nano
-    encode_kwargs:
-    # The kwargs for the encode method of the local embedding model. Details see [here](https://www.sbert.net/docs/package_reference/SentenceTransformer.html#sentence_transformers.SentenceTransformer.encode)
-      task: retrieval
-      prompt_name: document
-  api:
-    key: null # API Key of your embedding model API. Example: sk-or-v1-xxx (OpenRouter)
-    base_url: null # API URL of your embedding model API. Example: https://openrouter.ai/api/v1
-    model: null # The model name of the embedding model. Example: qwen/qwen3-embedding-8b
-    batch_size: null # The batch size for embedding API requests. Adjust to match your provider's limit. Example: 64
-
-executor:
-  debug: false # Whether to use debug mode. Example: true
-  send_empty: false # Whether to send an empty email even if no new papers today. Example: true
-  max_paper_num: 100 # The maximum number of the papers presented in the email. Example: 100
-  min_score: null # Minimum relevance score (0-10) to include a paper; null keeps all. Example: 0.5
-  keywords_include: null # Only keep papers whose title/abstract contains ANY of these substrings. Example: ["diffusion", "LLM"]
-  keywords_exclude: null # Drop papers whose title/abstract contains ANY of these substrings. Example: ["survey", "tutorial"]
-  dedupe_history: true # Skip papers already emailed in previous runs. Disabled automatically in debug mode. Example: true
-  notifiers: ['email'] # Delivery channels: 'email', 'webhook' (or both). Example: ['email', 'webhook']
-
-# Optional — only needed when executor.notifiers includes 'webhook'.
-# The digest is POSTed as JSON to this URL. Works with Telegram bots,
-# Server酱, 钉钉 custom bots, Discord/Slack webhooks, etc.
-webhook:
-  url: null # Example (Telegram): https://api.telegram.org/bot<TOKEN>/sendMessage
-  format: html # 'html' (default) or 'text' — how the digest body is sent
-  payload_field: content # JSON field carrying the digest text. Server酱 uses 'desp'
-  # headers: # Optional custom headers (e.g. Authorization)
-  #   Authorization: Bearer xxx
-  source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
-  reranker: local # The reranker to use. Example: 'local' or 'api'
-```
-
-That's all! Now you can test the workflow by manually triggering it:
-![test](./assets/test.png)
-
-> [!NOTE]
-> The Test-Workflow Action is the debug version of the main workflow (Send-emails-daily), which always retrieve 5 arxiv papers regardless of the date. While the main workflow will be automatically triggered everyday and retrieve new papers released yesterday. There is no new arxiv paper at weekends and holiday, in which case you may see "No new papers found" in the log of main workflow.
-
-Then check the log and the receiver email after it finishes.
-
-By default, the main workflow runs on 22:00 UTC everyday. You can change this time by editting the workflow config `.github/workflows/main.yml`.
-
-### Local Running
-Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run on your local device if uv is installed:
 ```bash
-# set all the environment variables
-# export ZOTERO_ID=xxxx
-# ...
+git clone https://github.com/<YOUR_USERNAME>/zotero-arxiv-daily.git
 cd zotero-arxiv-daily
-uv run main.py
 ```
 
-## 🚀 Sync with the latest version
-This project is in active development. You can subscribe this repo via `Watch` so that you can be notified once we publish new release.
+### 2. Install Dependencies
 
-![Watch](./assets/subscribe_release.png)
+```bash
+uv sync          # or: pip install -e .
+```
 
+### 3. Configure
 
-## 📖 How it works
-*Zotero-arXiv-Daily* firstly retrieves all the papers in your Zotero library and all the papers released in the previous day, via corresponding API. Then it calculates the embedding of each paper's abstract via an embedding model. The score of a paper is its weighted average similarity over all your Zotero papers (newer paper added to the library has higher weight). The TLDR of each paper is generated by LLM, given the text extracted by pymupdf4llm.
+Copy `config/base.yaml` to `config/local.yaml` and fill in the required fields:
 
-Each run also writes a machine-readable report to `.cache/last_run.json` (corpus / candidate / ranked counts, elapsed time, sources, reranker) — handy for monitoring the pipeline without scraping logs.
+```yaml
+zotero:
+  user_id: "12345678"
+  api_key: "your-zotero-api-key"
 
-## 📌 Limitations
-- The recommendation algorithm is very simple, it may not accurately reflect your interest. Welcome better ideas for improving the algorithm!
-- High `MAX_PAPER_NUM` can lead the execution time exceed the limitation of Github Action runner (6h per execution for public repo, and 2000 mins per month for private repo). Commonly, the quota given to public repo is definitely enough for individual use. If you have special requirements, you can deploy the workflow in your own server, or use a self-hosted Github Action runner, or pay for the exceeded execution time.
+source:
+  arxiv:
+    category: ["cs.AI", "cs.LG"]   # your research areas
 
+llm:
+  api:
+    key: "sk-xxx"                   # OpenRouter key
+    base_url: "https://openrouter.ai/api/v1"
+  generation_kwargs:
+    model: "gpt-5.6-luna"           # recommended model
+  harness:
+    enabled: true
+    top_k: 100
+    full_text_budget: 10
+    max_steps: 12
 
-## 📃 License
-Distributed under the AGPLv3 License. See `LICENSE` for detail.
+email:
+  sender: "you@example.com"
+  receiver: "you@outlook.com"
+  smtp_server: "smtp.example.com"
+  smtp_port: 587
+  sender_password: "your-smtp-password"
+```
 
-## ❤️ Acknowledgement
-- [pyzotero](https://github.com/urschrei/pyzotero)
-- [arxiv](https://github.com/lukasschwab/arxiv.py)
-- [sentence_transformers](https://github.com/UKPLab/sentence-transformers) (only needed for the `local` reranker; install via `pip install .[local-reranker]` or `uv sync --extra local-reranker`)
+See [`config/base.yaml`](config/base.yaml) for all options.
 
-## ☕ Buy Me A Coffee
-If you find this project helpful, welcome to sponsor me via WeChat or via [ko-fi](https://ko-fi.com/tidedra).
-![wechat_qr](assets/wechat_sponsor.JPG)
+### 4. Run Locally (Debug)
 
+```bash
+python -m zotero_arxiv_daily.executor --debug
+```
 
-## 🌟 Star History
+Check the generated email in `.cache/debug_email.html`.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=TideDra/zotero-arxiv-daily&type=Date)](https://star-history.com/#TideDra/zotero-arxiv-daily&Date)
+### 5. Deploy on GitHub Actions
+
+1. Push your fork to GitHub
+2. Go to **Settings → Secrets and variables → Actions**
+3. Add these secrets:
+   - `ZOTERO_USER_ID`
+   - `ZOTERO_API_KEY`
+   - `LLM_API_KEY`
+   - `EMAIL_SENDER`
+   - `EMAIL_RECEIVER`
+   - `SMTP_SERVER`
+   - `SMTP_PORT`
+   - `SENDER_PASSWORD`
+4. Enable the workflow: **Actions → Select workflow → Enable workflow**
+
+The action runs daily at 09:00 UTC (adjustable in `.github/workflows/digest.yml`).
+
+## 🏗 Architecture
+
+```
+┌─────────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Zotero Library      │     │  arXiv RSS/API   │     │  Corpus Cache   │
+│  (CorpusPaper[])     │     │  (RawPaperItem[])│     │  (.cache/)      │
+└─────────┬───────────┘     └────────┬─────────┘     └────────┬────────┘
+          │                          │                        │
+          ▼                          ▼                        │
+    ┌─────────────┐          ┌──────────────┐                │
+    │ build_profile│         │ retrieve     │                │
+    │  (cached)    │         │ papers       │                │
+    └──────┬──────┘          └──────┬───────┘                │
+           │                       │                         │
+           │                       ▼                         │
+           │                 ┌──────────────┐               │
+           │                 │ rerank       │               │
+           │                 │ (BM25+vec)   │               │
+           │                 └──────┬───────┘               │
+           │                        │                        │
+           │                        ▼                        │
+           │                 ┌──────────────┐               │
+           │                 │ filter       │               │
+           │                 │ (score/kw)   │               │
+           │                 └──────┬───────┘               │
+           │                        │                        │
+           │                        ▼                        │
+           │                 ┌──────────────────┐           │
+           │                 │ HarnessAgent     │◄──────────┘
+           │                 │  · inspect_...   │
+           │                 │  · submit_digest │
+           │                 └──────┬───────────┘
+           │                        │ Digest
+           ▼                        ▼
+    ┌──────────────────────────────────────┐
+    │  construct_email                     │
+    │  (safe HTML render + LaTeX→Unicode)  │
+    └──────────────┬───────────────────────┘
+                   │
+                   ▼
+            ┌─────────────┐
+            │ notify      │
+            │ (email/webhook)│
+            └─────────────┘
+```
+
+## 📂 Project Structure
+
+```
+src/zotero_arxiv_daily/
+├── protocol.py          # Data classes: Paper, CorpusPaper, RawPaperItem
+├── harness.py           # HarnessAgent: single agent loop + tools + Digest
+├── construct_email.py   # Safe HTML renderer: Digest → email HTML
+├── executor.py          # Pipeline orchestrator: fetch → rerank → agent → deliver
+├── retriever/           # Source-specific retrievers (arXiv, bioRxiv, medRxiv)
+├── reranker/            # Hybrid reranker (BM25 + embeddings, local or API)
+└── notifier/            # Delivery plugins (email, webhook)
+
+config/
+├── base.yaml            # Full config schema (copy to local.yaml)
+└── default.yaml         # Hydra defaults
+
+tests/                   # pytest suite (150 tests, ruff-clean)
+.github/workflows/       # GitHub Actions CI/CD
+```
+
+## 🧪 Testing
+
+```bash
+pytest          # 150 tests
+ruff check .    # linting
+```
+
+All tests pass with Python 3.13+.
+
+## 🔧 Configuration Reference
+
+| Section | Key | Description |
+|---------|-----|-------------|
+| `zotero` | `user_id`, `api_key` | Your Zotero account credentials |
+| `source.arxiv` | `category` | arXiv categories to monitor |
+| `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
+| `llm.generation_kwargs` | `model` | Model name (e.g. `gpt-5.6-luna`) |
+| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps` | Agent configuration |
+| `reranker` | `local` / `api` | Embedding reranker choice |
+| `email` | `sender`, `receiver`, `receivers`, `smtp_*` | SMTP delivery settings |
+| `executor` | `source`, `reranker`, `debug`, `send_empty`, `notifiers` | Pipeline control |
+
+## 🙏 Credits
+
+This project is a complete rewrite of [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily), introducing a single HarnessAgent architecture inspired by Claude Code, Codex, and OpenClaw agent patterns.
+
+## 📄 License
+
+MIT

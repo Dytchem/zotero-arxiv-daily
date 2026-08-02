@@ -38,7 +38,7 @@ executor:
   debug: ${oc.env:DEBUG,null}
   source: ['arxiv']
   reranker: api
-  max_paper_num: 10
+  max_paper_num: 30
   send_empty: true
 
 reranker:

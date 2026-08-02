@@ -309,14 +309,12 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     if digest.papers:
         # Map candidate index -> original Paper so we can pull authors/url/pdf/source.
         originals_by_index = dict(enumerate(originals or []))
-        # Render picks in descending relevance order (agent order is editorial,
-        # but readers expect the strongest match first).
-        ordered = sorted(
-            digest.papers,
-            key=lambda dp: ((originals_by_index.get(dp.index).score if originals_by_index.get(dp.index) else None) or 0.0),
-            reverse=True,
-        )
-        for dp in ordered:
+        # Render picks in the agent's own editorial order: the agent is the
+        # expert who decides what matters most to this reader. It has been
+        # instructed to order its papers list by value (lead with the strongest
+        # or most useful pick, not by the raw embedding score). Trust its
+        # judgement instead of re-sorting by a number.
+        for dp in digest.papers:
             paper = originals_by_index.get(dp.index)
             title_text = paper.title if paper else f"Paper {dp.index}"
             authors = ", ".join((paper.authors or [])[:5]) if paper else ""

@@ -122,19 +122,24 @@ def test_render_email_preheader_and_footer_localised():
     assert "GitHub Actions" in html
 
 
-def test_render_email_picks_sorted_by_score_desc():
-    """Recommended cards render highest relevance first."""
+def test_render_email_picks_preserve_agent_order():
+    """Recommended cards render in the agent's editorial order, not score order.
+
+    The agent is the expert: the order of its papers array is the display order,
+    so a lower-scoring paper listed first must appear first in the email.
+    """
     digest = Digest(
         subject="s", intro="",
         papers=[
-            DigestPaper(index=0, reason="low"),
-            DigestPaper(index=1, reason="high"),
+            DigestPaper(index=0, reason="lead pick"),
+            DigestPaper(index=1, reason="second pick"),
         ],
         outro="",
     )
     originals = [_paper(0, title="Low Score Paper", score=4.0), _paper(1, title="High Score Paper", score=9.0)]
     html = render_email(digest, originals=originals)
-    assert html.index("High Score Paper") < html.index("Low Score Paper")
+    # Agent listed index 0 (score 4.0) first — it must stay first.
+    assert html.index("Low Score Paper") < html.index("High Score Paper")
 
 
 def test_render_email_others_last_item_no_border():

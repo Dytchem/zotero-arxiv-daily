@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [1.3.1] - 2026-08-02
+
+### Changed
+- **Agent-ranked display order**: the email's recommended cards now render in
+  the agent's own editorial order instead of being re-sorted by the embedding
+  score. The generator is explicitly instructed to order its picks like an
+  experienced researcher — lead with what matters most to this reader — and
+  the render layer trusts that judgement.
+- `max_paper_num` deployment config raised 10 → 30, giving the agent a wider
+  candidate window to choose from (the unused `top_k=100` cap now has room to
+  apply once more candidates survive the filters).
+
 ## [1.3.0] - 2026-08-02
 
 ### Added

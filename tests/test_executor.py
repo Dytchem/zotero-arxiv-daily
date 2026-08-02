@@ -149,7 +149,7 @@ def test_fetch_zotero_corpus_paper_with_zero_collections(config, monkeypatch):
 
 
 def test_run_end_to_end(config, monkeypatch):
-    """Full pipeline: Zotero fetch -> filter -> retrieve -> rerank -> TLDR -> email."""
+    """Full pipeline: Zotero fetch -> filter -> retrieve -> rerank -> agent -> email."""
     import smtplib
 
     from omegaconf import open_dict
@@ -171,10 +171,10 @@ def test_run_end_to_end(config, monkeypatch):
     stub_zot = make_stub_zotero_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
 
-    # 2. Stub OpenAI (for reranker + TLDR/affiliations)
+    # 2. Stub OpenAI (reranker + harness agent)
     stub_client = make_stub_openai_client()
-    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
     retrieved = [
         make_sample_paper(title="E2E Paper 1", score=None, url="https://arxiv.org/abs/test-e2e-paper-1"),
         make_sample_paper(title="E2E Paper 2", score=None, url="https://arxiv.org/abs/test-e2e-paper-2"),
@@ -190,14 +190,15 @@ def test_run_end_to_end(config, monkeypatch):
         lambda self: retrieved,
     )
 
+    # 3. Stub full-text prefetch (avoid real network in tests)
+    executor = Executor(config)
+    monkeypatch.setattr(executor, "_maybe_fetch_full_texts", lambda papers: None)
+
     # 4. Stub SMTP
     sent = []
     monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
 
-    # 5. Stub sleep (reranker/retriever)
-
-    # 6. Run
-    executor = Executor(config)
+    # 5. Run
     # Defensive clean: reranker.api writes a corpus_embeddings.json next to
     # sent_papers.json; stale state from a previous run can otherwise leak
     # into this test and cause `Dropped N already sent` even on a fresh tmp.
@@ -232,8 +233,8 @@ def test_run_no_papers_send_empty_false(config, monkeypatch, tmp_path):
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
 
     stub_client = make_stub_openai_client()
-    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
 
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
     from zotero_arxiv_daily.retriever.base import registered_retrievers
@@ -268,8 +269,8 @@ def test_run_no_papers_send_empty_true(config, monkeypatch, tmp_path):
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
 
     stub_client = make_stub_openai_client()
-    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
 
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
     from zotero_arxiv_daily.retriever.base import registered_retrievers
@@ -325,19 +326,29 @@ def test_populate_full_text_handles_failure(config, monkeypatch):
 
 
 def test_generate_summaries_runs_all_papers(config, monkeypatch):
-    """Concurrent summary generation covers every paper."""
-    from tests.canned_responses import make_sample_paper, make_stub_openai_client
+    """Legacy per-paper TLDR/affiliations path was removed in the harness refactor.
+
+    The single HarnessAgent now owns all editorial output. This test verifies the
+    executor's digest path: _agent_digest returns a Digest (fallback when the
+    agent can't run), and selected papers flow to the renderer.
+    """
+    from tests.canned_responses import make_sample_paper
     from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest
 
     executor = Executor(config)
-    executor.openai_client = make_stub_openai_client()
-    monkeypatch.setattr(executor, "_populate_full_text", lambda p: None)
+    papers = [
+        make_sample_paper(title=f"Concurrent Paper {i}", url=f"https://arxiv.org/abs/x{i}")
+        for i in range(3)
+    ]
+    # Disable the LLM harness so _agent_digest takes the fallback path.
+    from omegaconf import open_dict
 
-    papers = [make_sample_paper(title=f"Concurrent Paper {i}") for i in range(3)]
-    executor._generate_summaries(papers)
-    for p in papers:
-        assert p.tldr is not None, p.title
-        assert p.affiliations is not None, p.title
+    with open_dict(config.llm.harness):
+        config.llm.harness.enabled = False
+    digest = executor._agent_digest(papers, [])
+    assert isinstance(digest, Digest)
+    assert len(digest.papers) == 3
 
 
 def test_validate_config_missing_zotero_user_id(config):
@@ -603,8 +614,8 @@ def test_run_single_source_failure_degrades(config, monkeypatch, tmp_path):
     stub_zot = make_stub_zotero_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
     stub_client = make_stub_openai_client()
-    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
 
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
     from zotero_arxiv_daily.retriever.base import registered_retrievers
@@ -622,6 +633,7 @@ def test_run_single_source_failure_degrades(config, monkeypatch, tmp_path):
     monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
 
     executor = Executor(config)
+    monkeypatch.setattr(executor, "_maybe_fetch_full_texts", lambda papers: None)
     executor.run()
 
     assert len(sent) == 1, "Email must still be sent when one source fails"

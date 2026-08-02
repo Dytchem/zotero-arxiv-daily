@@ -1,21 +1,28 @@
-"""LLM Harness — the smart reranking stage of the daily digest.
+"""LLM Harness — a single autonomous agent that produces the daily digest.
 
-Two-stage recommendation pipeline:
+Instead of a rigid pipeline (embedding rerank -> per-paper TLDR/affiliations ->
+hard-coded HTML template), this module runs ONE agent loop. The agent:
 
-  Stage 1 (cheap, existing): embedding similarity + BM25 hybrid rerank
-      narrows the day's candidates to a manageable ``top_k``.
-  Stage 2 (this module): an LLM reads a *research profile* distilled from
-      the user's Zotero library, then scores each candidate (0-10) with a
-      one-line rationale. Scores reorder the final digest and the rationale
-      is shown in the email card.
+  1. reads a research profile distilled from the user's Zotero library,
+  2. inspects the day's embedding-ranked candidates (its own tools),
+  3. decides which papers to recommend and why,
+  4. writes the complete email: subject, intro, per-paper cards, outro.
 
-The profile is cached (keyed by a hash of the corpus) so the LLM only
-re-distills it when the library actually changes — the common daily case
-is a pure rerank of fresh candidates.
+The pipeline *feeds* the agent the cheap stuff (embedding+BM25 vector order),
+but every editorial decision — what to include, how to phrase each reason,
+how to structure the mail — is the agent's job.
 
-Every LLM call here is best-effort: on any failure the harness logs and
-returns the input unchanged, so the pipeline degrades gracefully to the
-Stage-1 ranking instead of breaking the daily email.
+The agent ends by calling ``submit_digest`` with a structured JSON payload.
+A thin, safe render layer (``construct_email``) turns that payload into HTML,
+so the agent never touches raw markup and the pipeline can never be broken by
+a stray ``$\\alpha$`` or a malformed link.
+
+Failure handling: any LLM error, missing credentials, or malformed reply
+degrades gracefully to the embedding order (no digest -> fallback rendering),
+so the daily email always goes out.
+
+Only ONE LLM provider is used (``llm.api``, e.g. OpenRouter ``gpt-5.6-luna``).
+The legacy per-paper TLDR / affiliations providers are gone.
 """
 
 from __future__ import annotations
@@ -38,6 +45,26 @@ from .protocol import CorpusPaper, Paper
 
 
 @dataclass
+class DigestPaper:
+    """One recommended paper as decided by the agent."""
+
+    index: int  # position in the candidate list passed to the agent
+    reason: str  # the agent's why-this-paper rationale (shown in the email)
+    tldr: str = ""  # optional one-line takeaway
+
+
+@dataclass
+class Digest:
+    """The agent's complete editorial output — becomes the email."""
+
+    subject: str
+    intro: str
+    papers: list[DigestPaper] = field(default_factory=list)
+    sections: list[dict] = field(default_factory=list)  # optional grouping
+    outro: str = ""
+
+
+@dataclass
 class ResearchProfile:
     """LLM-distilled description of the user's research interests."""
 
@@ -47,43 +74,41 @@ class ResearchProfile:
     summary: str = ""
 
 
-@dataclass
-class HarnessScore:
-    """LLM judgement for one candidate paper."""
-
-    index: int          # position in the candidate list passed to the LLM
-    score: float        # 0-10 relevance to the user's profile
-    reason: str         # one-line why-this-paper rationale (shown in email)
-
-
 # ----------------------------------------------------------------------
-# Prompt helpers
+# Small helpers
 # ----------------------------------------------------------------------
-
-
-def _corpus_hash(corpus: list[CorpusPaper]) -> str:
-    """Content hash of the corpus — used as the profile cache key."""
-    h = hashlib.sha256()
-    for c in corpus:
-        h.update(c.title.encode("utf-8", errors="ignore"))
-        h.update(c.abstract.encode("utf-8", errors="ignore"))
-        h.update(c.added_date.isoformat().encode("utf-8", errors="ignore"))
-    return h.hexdigest()
 
 
 def _truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "…"
+    if text is None:
+        return ""
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _extract_json(content: str) -> object:
+    """Parse JSON from an LLM reply, tolerating markdown fences / prose."""
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"[\[{].*[\]}]", text, flags=re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
+
+
+def _authors_line(paper: Paper) -> str:
+    if not paper.authors:
+        return ""
+    head = ", ".join(paper.authors[:3])
+    return head + (" et al." if len(paper.authors) > 3 else "")
 
 
 def _profile_prompt(corpus: list[CorpusPaper], language: str) -> str:
-    """Ask the LLM to distill the Zotero library into a research profile.
-
-    Only the most recent papers are included (newest additions best
-    reflect current interests); each abstract is truncated to keep the
-    prompt inside the model's context window.
-    """
+    """Ask the LLM to distill the Zotero library into a research profile."""
     recent = sorted(corpus, key=lambda c: c.added_date, reverse=True)[:40]
     entries = []
     for i, c in enumerate(recent, 1):
@@ -106,81 +131,50 @@ def _profile_prompt(corpus: list[CorpusPaper], language: str) -> str:
     )
 
 
-def _rerank_prompt(profile: ResearchProfile, candidates: list[Paper], language: str) -> str:
-    """Ask the LLM to score each candidate against the research profile."""
-    entries = []
-    for i, c in enumerate(candidates, 1):
-        authors = ", ".join(c.authors[:3]) + (" et al." if len(c.authors) > 3 else "")
-        entries.append(
-            f"{i}. {c.title} ({authors})\n"
-            f"   Abstract: {_truncate(c.abstract, 250)}"
-        )
-    profile_text = (
-        f"Topics: {', '.join(profile.topics)}\n"
-        f"Keywords: {', '.join(profile.keywords)}\n"
-        f"Methods: {', '.join(profile.methods)}\n"
-        f"Summary: {profile.summary}"
-    )
-    return (
-        f"You are a research recommender. The user's research profile:\n{profile_text}\n\n"
-        f"Score each candidate paper below by relevance to this profile. "
-        f"Respond with STRICT JSON only: an array of objects, one per paper, in the same order:\n"
-        f'[{{"index": 1, "score": 7.5, "reason": "one-line rationale in {language}"}}, ...]\n'
-        f"Rules: score 0-10 (10 = must read, 0 = irrelevant); reason concise, in {language}; "
-        f"no markdown, no trailing commas.\n\nCandidates:\n" + "\n".join(entries)
-    )
-
-
 # ----------------------------------------------------------------------
-# Harness
+# The agent
 # ----------------------------------------------------------------------
 
 
-class LLMHarness:
-    """Two-stage LLM reranking on top of the cheap embedding rerank.
+class HarnessAgent:
+    """A single tool-using agent that produces the daily Digest.
 
-    Uses its own API provider (OpenRouter by default — same provider as the
-    ``reranker.api``) with a strong reasoning model (e.g. ``gpt-5.6-luna``),
-    independent from the TLDR generation provider (``llm.api``, e.g. Ollama).
+    The agent builds the research profile (cached), inspects candidates with
+    its own tools, then calls ``submit_digest`` with the finished editorial
+    output. On any failure it falls back to a plain embedding-order digest.
     """
 
     def __init__(self, config: DictConfig):
         self.config = config
-        harness_cfg = config.llm.get("harness") or {}
-        self.enabled = bool(harness_cfg.get("enabled", False))
-        self.top_k = int(harness_cfg.get("top_k", 100))
-        self.batch_size = int(harness_cfg.get("batch_size", 25))
-        self.language = config.llm.get("language", "English")
+        llm_cfg = config.llm or {}
+        api_cfg = llm_cfg.get("api") or {}
+        self.language = llm_cfg.get("language", "English")
+        self.top_k = int((llm_cfg.get("harness") or {}).get("top_k", 100))
         self.cache_dir = Path(config.executor.get("cache_dir") or ".cache")
 
-        # Fully independent provider entry (key/base_url/model), NOT shared
-        # with reranker.api or llm.api. Keeps each stage free to point at
-        # its own provider (e.g. OpenRouter for rerank+harness, Ollama for
-        # TLDR). Missing credentials degrade to disabled (embedding order).
-        api_cfg = harness_cfg.get("api") or {}
         self.api_key = api_cfg.get("key")
         self.api_base = api_cfg.get("base_url")
-        self.model = api_cfg.get("model")
-        if not (self.api_key and self.api_base and self.model):
-            logger.warning(
-                "llm.harness.api is incomplete (key/base_url/model); "
-                "LLM Harness will stay disabled and embedding order is kept"
-            )
-            self.enabled = False
-            self.client = None
-            self.generation_kwargs = {}
-            return
-        self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
-        self.generation_kwargs = dict(config.llm.get("generation_kwargs") or {})
-        self.generation_kwargs["model"] = self.model
+        self.model = (llm_cfg.get("generation_kwargs") or {}).get("model") or api_cfg.get("model")
+        self.enabled = bool(llm_cfg.get("harness", {}).get("enabled", False))
 
-    # -- profile -------------------------------------------------------
+        if not (self.enabled and self.api_key and self.api_base and self.model):
+            logger.warning(
+                "llm (harness) is disabled or incomplete (key/base_url/model); "
+                "falling back to embedding-order digest"
+            )
+            self.client = None
+        else:
+            self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
+            self.generation_kwargs = dict(llm_cfg.get("generation_kwargs") or {})
+            self.generation_kwargs["model"] = self.model
+
+    # -- research profile (cached) ------------------------------------
 
     def _profile_cache_path(self) -> Path:
         return self.cache_dir / "research_profile.json"
 
     def _profile_cache_key(self, corpus: list[CorpusPaper]) -> str:
-        return _corpus_hash(corpus)
+        return self._corpus_hash(corpus)
 
     def _load_cached_profile(self, key: str) -> ResearchProfile | None:
         path = self._profile_cache_path()
@@ -218,23 +212,22 @@ class LLMHarness:
 
     def build_profile(self, corpus: list[CorpusPaper]) -> ResearchProfile | None:
         """Distill the Zotero library into a research profile (cached by corpus hash)."""
-        key = self._profile_cache_key(corpus)
+        if self.client is None:
+            return None
+        key = self._corpus_hash(corpus)
         cached = self._load_cached_profile(key)
         if cached is not None:
             logger.info("Using cached research profile (corpus unchanged)")
             return cached
-
-        prompt = _profile_prompt(corpus, self.language)
         try:
             response = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": "You output valid JSON only."},
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": _profile_prompt(corpus, self.language)},
                 ],
                 **self.generation_kwargs,
             )
-            content = response.choices[0].message.content or "{}"
-            data = _extract_json(content)
+            data = _extract_json(response.choices[0].message.content or "{}")
             profile = ResearchProfile(
                 topics=data.get("topics", []),
                 keywords=data.get("keywords", []),
@@ -254,59 +247,257 @@ class LLMHarness:
             logger.warning(f"Failed to build research profile: {exc}")
             return None
 
-    # -- rerank --------------------------------------------------------
+    def _corpus_hash(self, corpus: list[CorpusPaper]) -> str:
+        h = hashlib.sha256()
+        for c in corpus:
+            h.update(c.title.encode("utf-8", errors="ignore"))
+            h.update(c.abstract.encode("utf-8", errors="ignore"))
+            h.update(c.added_date.isoformat().encode("utf-8", errors="ignore"))
+        return h.hexdigest()
 
-    def rerank(self, candidates: list[Paper], profile: ResearchProfile) -> list[Paper]:
-        """LLM scores candidates; returns the reordered list (failure = input order)."""
-        if not candidates:
-            return candidates
-        scores: dict[int, float] = {}
-        reasons: dict[int, str] = {}
-        for start in range(0, len(candidates), self.batch_size):
-            batch = candidates[start:start + self.batch_size]
+    # -- tools exposed to the agent -----------------------------------
+
+    def _tool_defs(self, candidate_count: int) -> list[dict]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect_candidates",
+                    "description": (
+                        "List the day's candidate papers with their embedding relevance "
+                        "score and a short abstract. Call this to see what is available "
+                        "before deciding what to recommend."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "start": {"type": "integer", "description": "0-based start index"},
+                            "count": {"type": "integer", "description": "how many to show (max 20)"},
+                        },
+                        "required": ["start"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect_paper",
+                    "description": (
+                        "Show the full abstract (and preview of full text, if already "
+                        "fetched) for one candidate by its index."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"index": {"type": "integer"}},
+                        "required": ["index"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_digest",
+                    "description": (
+                        "Submit the final digest: your editorial decision about which "
+                        "papers to recommend and the full email content. Call this once "
+                        "when done. It ends the loop."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "subject": {"type": "string", "description": "email subject line"},
+                            "intro": {"type": "string", "description": "opening paragraph"},
+                            "papers": {
+                                "type": "array",
+                                "description": "papers you recommend, by candidate index",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "index": {"type": "integer"},
+                                        "reason": {
+                                            "type": "string",
+                                            "description": "why this paper matters to the user",
+                                        },
+                                        "tldr": {"type": "string", "description": "optional one-line takeaway"},
+                                    },
+                                    "required": ["index", "reason"],
+                                },
+                            },
+                            "outro": {"type": "string", "description": "closing paragraph"},
+                        },
+                        "required": ["subject", "intro", "papers", "outro"],
+                    },
+                },
+            },
+        ]
+
+    # -- digest generation ---------------------------------------------
+
+    def generate(self, candidates: list[Paper], corpus: list[CorpusPaper]) -> Digest | None:
+        """Run the agent loop and return the Digest. None on any failure."""
+        if self.client is None or not candidates:
+            return None
+        profile = self.build_profile(corpus)
+        if profile is None:
+            return None
+
+        profile_text = (
+            f"Topics: {', '.join(profile.topics)}\n"
+            f"Keywords: {', '.join(profile.keywords)}\n"
+            f"Methods: {', '.join(profile.methods)}\n"
+            f"Summary: {profile.summary}"
+        )
+
+        system_prompt = (
+            "You are an elite research-recommendation agent. Your job is to read a "
+            "scientist's research profile, inspect the day's candidate papers, and "
+            "produce a high-quality daily digest email.\n\n"
+            f"Research profile:\n{profile_text}\n\n"
+            "Tasks:\n"
+            "1. Use inspect_candidates to survey the day's papers (embedding score 0-10 "
+            "is a hint, not a command — use your judgement).\n"
+            "2. Use inspect_paper on any paper you are unsure about.\n"
+            "3. Decide which papers to recommend. Prefer a small set of genuinely "
+            "relevant papers over a huge dump. A good reason must connect the paper to "
+            "the user's actual interests.\n"
+            "4. Write the digest in " + self.language + ".\n"
+            "5. Call submit_digest with the finished subject, intro, per-paper "
+            "recommendation reasons, and outro.\n\n"
+            "Quality bar: reasons should be specific and insightful, not generic. The "
+            "subject should be short and informative. The intro should give context; "
+            "the outro should sign off warmly."
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        digest: Digest | None = None
+        max_steps = 12
+
+        # Keep full texts of inspected papers for tools.
+        for step in range(max_steps):
             try:
                 response = self.client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "You output valid JSON only."},
-                        {"role": "user", "content": _rerank_prompt(profile, batch, self.language)},
-                    ],
-                    **self.generation_kwargs,
+                    model=self.model,
+                    messages=messages,
+                    tools=self._tool_defs(len(candidates)),
+                    tool_choice="auto",
                 )
-                content = response.choices[0].message.content or "[]"
-                items = _extract_json(content)
-                if not isinstance(items, list):
-                    raise ValueError("LLM rerank response is not a JSON array")
-                for item in items:
-                    idx = int(item.get("index", 0)) - 1  # 1-based from prompt
-                    if 0 <= idx < len(batch):
-                        scores[start + idx] = float(item.get("score", 0))
-                        reasons[start + idx] = str(item.get("reason", ""))
             except Exception as exc:
-                logger.warning(f"LLM rerank batch failed ({exc}); keeping embedding order")
-                return candidates
-        if not scores:
-            logger.warning("LLM rerank returned no scores; keeping embedding order")
-            return candidates
-        for i, paper in enumerate(candidates):
-            if i in scores:
-                paper.score = round(scores[i], 1)
-                paper.recommend_reason = reasons.get(i)
-        ranked = sorted(candidates, key=lambda p: p.score if p.score is not None else -1, reverse=True)
-        logger.info(f"LLM rerank scored {len(scores)}/{len(candidates)} candidates")
-        return ranked
+                logger.warning(f"LLM harness call failed at step {step}: {exc}")
+                return None
 
+            msg = response.choices[0].message
+            if not msg.tool_calls:
+                # No tool call — nudge the model (or bail after a couple tries).
+                messages.append({"role": "assistant", "content": msg.content or ""})
+                messages.append({
+                    "role": "user",
+                    "content": "Please either continue inspecting or call submit_digest to finish.",
+                })
+                continue
 
-def _extract_json(content: str) -> object:
-    """Parse JSON from an LLM reply, tolerating markdown fences / prose."""
-    text = content.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        # Fall back to the first [...] or {...} block in the reply
-        match = re.search(r"[\[{].*[\]}]", text, flags=re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        raise
+            messages.append(msg)
+            for tc in msg.tool_calls:
+                name = tc.function.name
+                args = json.loads(tc.function.arguments or "{}")
+                if name == "submit_digest":
+                    digest = self._digest_from_args(args, len(candidates))
+                    # Acknowledge and finish.
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "Digest received.",
+                    })
+                    return digest
+                elif name == "inspect_candidates":
+                    start = int(args.get("start", 0))
+                    count = min(int(args.get("count", 20)), 20)
+                    result = self._describe_candidates(candidates, start, count)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+                elif name == "inspect_paper":
+                    idx = int(args.get("index", -1))
+                    result = self._describe_paper(candidates, idx)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+                else:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "Unknown tool.",
+                    })
+
+        logger.warning("Harness agent reached max steps without submitting a digest")
+        return digest
+
+    def _describe_candidates(self, candidates: list[Paper], start: int, count: int) -> str:
+        if not candidates:
+            return "No candidates."
+        lines = []
+        for i in range(start, min(start + count, len(candidates))):
+            p = candidates[i]
+            score = round(p.score, 1) if p.score is not None else "?"
+            lines.append(
+                f"[{i}] {p.title} | embedding={score}/10 | {p.source}\n"
+                f"    {_authors_line(p)}\n"
+                f"    Abstract: {_truncate(p.abstract, 220)}"
+            )
+        return "\n".join(lines) if lines else f"Index out of range (0..{len(candidates)-1})."
+
+    def _describe_paper(self, candidates: list[Paper], index: int) -> str:
+        if not (0 <= index < len(candidates)):
+            return f"Index out of range (0..{len(candidates)-1})."
+        p = candidates[index]
+        body = p.full_text or p.abstract or ""
+        return (
+            f"[{index}] {p.title}\n"
+            f"Authors: {_authors_line(p)}\n"
+            f"URL: {p.url}\n"
+            f"Full abstract:\n{p.abstract}\n"
+            f"Full-text preview:\n{_truncate(body, 4000)}"
+        )
+
+    @staticmethod
+    def _digest_from_args(args: dict, candidate_count: int) -> Digest:
+        papers = []
+        for item in args.get("papers") or []:
+            try:
+                idx = int(item.get("index", -1))
+            except (TypeError, ValueError):
+                idx = -1
+            papers.append(
+                DigestPaper(
+                    index=idx,
+                    reason=str(item.get("reason", "")),
+                    tldr=str(item.get("tldr", "")),
+                )
+            )
+        return Digest(
+            subject=str(args.get("subject", "")),
+            intro=str(args.get("intro", "")),
+            papers=papers,
+            sections=args.get("sections") or [],
+            outro=str(args.get("outro", "")),
+        )
+
+    # -- fallback -------------------------------------------------------
+
+    @staticmethod
+    def fallback_digest(candidates: list[Paper], max_papers: int) -> Digest:
+        """Plain embedding-order digest used when the agent can't run."""
+        papers = [
+            DigestPaper(index=i, reason=_truncate(p.recommend_reason or "", 200))
+            for i, p in enumerate(candidates[:max_papers])
+        ]
+        return Digest(
+            subject="Daily paper digest",
+            intro="Here is today's selection, ordered by relevance to your library.",
+            papers=papers,
+            sections=[],
+            outro="Enjoy reading!",
+        )

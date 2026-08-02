@@ -1,173 +1,67 @@
-"""Tests for zotero_arxiv_daily.protocol: Paper.generate_tldr, Paper.generate_affiliations."""
+"""Tests for zotero_arxiv_daily.protocol: Paper / CorpusPaper dataclasses.
 
-import pytest
+The legacy TLDR/affiliations generation methods were removed when the pipeline
+moved to the single HarnessAgent — these tests now cover the data model and
+its defaults.
+"""
 
-from tests.canned_responses import make_sample_paper, make_stub_openai_client
+from datetime import datetime
 
-
-@pytest.fixture()
-def llm_params():
-    return {
-        "language": "English",
-        "generation_kwargs": {"model": "gpt-4o-mini", "max_tokens": 16384},
-    }
+from tests.canned_responses import make_sample_paper
+from zotero_arxiv_daily.protocol import CorpusPaper, Paper
 
 
-# ---------------------------------------------------------------------------
-# generate_tldr
-# ---------------------------------------------------------------------------
-
-
-def test_tldr_returns_response(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper()
-    result = paper.generate_tldr(client, llm_params)
-    assert result == "Hello! How can I assist you today?"
-    assert paper.tldr == result
-
-
-def test_tldr_without_abstract_or_fulltext(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper(abstract="", full_text=None)
-    result = paper.generate_tldr(client, llm_params)
-    assert "Failed to generate TLDR" in result
-
-
-def test_tldr_falls_back_to_abstract_on_error(llm_params):
-    paper = make_sample_paper()
-
-    # Client whose create() raises
-    from types import SimpleNamespace
-
-    broken_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(RuntimeError("API down")))
-        )
+def test_paper_defaults():
+    p = Paper(
+        source="arxiv",
+        title="T",
+        authors=["A"],
+        abstract="abs",
+        url="https://arxiv.org/abs/1",
     )
-    result = paper.generate_tldr(broken_client, llm_params)
-    assert result == paper.abstract
+    assert p.pdf_url is None
+    assert p.full_text is None
+    assert p.tldr is None
+    assert p.affiliations is None
+    assert p.score is None
+    assert p.source_url is None
+    assert p.recommend_reason is None
 
 
-def test_tldr_truncates_long_prompt(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper(full_text="word " * 10000)
-    result = paper.generate_tldr(client, llm_params)
-    assert result is not None
-
-
-# ---------------------------------------------------------------------------
-# generate_affiliations
-# ---------------------------------------------------------------------------
-
-
-def test_affiliations_returns_parsed_list(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    assert isinstance(result, list)
-    assert "TsingHua University" in result
-    assert "Peking University" in result
-
-
-def test_affiliations_none_without_fulltext(llm_params):
-    client = make_stub_openai_client()
-    paper = make_sample_paper(full_text=None)
-    result = paper.generate_affiliations(client, llm_params)
-    assert result is None
-
-
-def test_affiliations_deduplicates(llm_params):
-    """The stub returns two distinct affiliations, so no dedup needed.
-    But confirm the set() dedup in the code doesn't break anything.
-    """
-    client = make_stub_openai_client()
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    assert len(result) == len(set(result))
-
-
-def test_affiliations_malformed_llm_output(llm_params):
-    """LLM returns affiliations without JSON brackets. Should fall back gracefully."""
-    from types import SimpleNamespace
-
-    def create_no_brackets(**kwargs):
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="TsingHua University, Peking University"),
-                )
-            ]
-        )
-
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create_no_brackets)
-        )
+def test_paper_all_fields():
+    p = Paper(
+        source="arxiv",
+        title="T",
+        authors=["A", "B"],
+        abstract="abs",
+        url="https://arxiv.org/abs/1",
+        pdf_url="https://arxiv.org/pdf/1",
+        full_text="full",
+        tldr="one-liner",
+        affiliations=["MIT"],
+        score=8.5,
+        source_url="https://arxiv.org/list/cs.AI/recent",
+        recommend_reason="direct hit",
     )
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(client, llm_params)
-    # re.search for [...] will fail -> AttributeError -> caught -> returns None
-    assert result is None
+    assert p.score == 8.5
+    assert p.tldr == "one-liner"
+    assert p.affiliations == ["MIT"]
+    assert p.recommend_reason == "direct hit"
 
 
-def test_affiliations_error_returns_none(llm_params):
-    from types import SimpleNamespace
+def test_sample_paper_roundtrip():
+    p = make_sample_paper()
+    assert p.title == "Sample Paper Title"
+    assert p.source == "arxiv"
+    assert p.url.startswith("https://arxiv.org/abs/")
 
-    broken_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")))
-        )
+
+def test_corpus_paper_fields():
+    c = CorpusPaper(
+        title="T",
+        abstract="abs",
+        added_date=datetime(2026, 1, 1),
+        paths=["2026/survey", "reading"],
     )
-    paper = make_sample_paper()
-    result = paper.generate_affiliations(broken_client, llm_params)
-    assert result is None
-    assert paper.affiliations is None
-
-
-def test_tldr_truncation_keeps_header(llm_params):
-    """Long full text is truncated from the body, title/abstract stay intact."""
-    from types import SimpleNamespace
-
-    from tests.canned_responses import _make_chat_response
-
-    seen: dict = {}
-
-    def recording_create(**kwargs):
-        seen["messages"] = kwargs["messages"]
-        return _make_chat_response("TLDR stub")
-
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=recording_create))
-    )
-    long_text = ("word " * 5000) + "UNIQUE_TRAILING_MARKER"
-    paper = make_sample_paper(full_text=long_text)
-    paper.generate_tldr(client, llm_params)
-
-    prompt = seen["messages"][1]["content"]
-    assert "Sample Paper Title" in prompt               # title kept
-    assert "UNIQUE_TRAILING_MARKER" not in prompt       # tail of body truncated
-    assert "Preview of main content" in prompt          # structure preserved
-
-
-def test_tldr_language_respected(llm_params):
-    """Configured language reaches both the system and user prompts."""
-    from types import SimpleNamespace
-
-    from tests.canned_responses import _make_chat_response
-
-    seen: dict = {}
-
-    def recording_create(**kwargs):
-        seen["messages"] = kwargs["messages"]
-        return _make_chat_response("TLDR stub")
-
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=recording_create))
-    )
-    paper = make_sample_paper()
-    paper.generate_tldr(client, {"language": "Chinese", "generation_kwargs": {"model": "gpt-4o-mini"}})
-
-    system_prompt = seen["messages"][0]["content"]
-    user_prompt = seen["messages"][1]["content"]
-    assert "Chinese" in system_prompt
-    assert "in Chinese" in user_prompt
+    assert c.paths == ["2026/survey", "reading"]
+    assert c.added_date.year == 2026

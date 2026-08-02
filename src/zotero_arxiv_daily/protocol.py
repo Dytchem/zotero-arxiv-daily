@@ -1,17 +1,20 @@
-import json
-import re
+"""Data classes for the daily digest pipeline.
+
+The old TLDR/affiliations methods are gone — that work is now the single
+HarnessAgent's job. Paper keeps the legacy ``tldr``/``affiliations`` fields
+as None so old serialized Paper objects still load.
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TypeVar
 
-import tiktoken
-from loguru import logger
-from openai import OpenAI
-
-RawPaperItem = TypeVar('RawPaperItem')
 
 @dataclass
 class Paper:
+    """One retrieved candidate paper, used everywhere downstream."""
+
     source: str
     title: str
     authors: list[str]
@@ -25,123 +28,25 @@ class Paper:
     source_url: str | None = None
     recommend_reason: str | None = None
 
-    def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
-        lang = llm_params.get('language', 'English')
-        intro = f"Given the following information of a paper, generate a one-sentence TLDR summary in {lang}:\n\n"
-        sections = []
-        if self.title:
-            sections.append(f"Title:\n {self.title}\n\n")
-        if self.abstract:
-            sections.append(f"Abstract: {self.abstract}\n\n")
-        if self.full_text:
-            sections.append(f"Preview of main content:\n {self.full_text}\n\n")
 
-        if not self.full_text and not self.abstract:
-            logger.warning(f"Neither full text nor abstract is provided for {self.url}")
-            return "Failed to generate TLDR. Neither full text nor abstract is provided"
-
-        # use gpt-4o tokenizer for estimation
-        enc = tiktoken.encoding_for_model("gpt-4o")
-        max_tokens = 4000
-
-        # Keep the header (title + abstract) intact and cap only the full-text
-        # preview. Truncating from the start would drop the paper body that we
-        # paid to download.
-        header = intro + "".join(s for s in sections if not s.startswith("Preview"))
-        header_tokens = enc.encode(header)
-        budget = max_tokens - len(header_tokens)
-
-        if budget > 0 and self.full_text:
-            body_tokens = enc.encode(self.full_text)
-            self_body = enc.decode(body_tokens[:budget]) if len(body_tokens) > budget else self.full_text
-            prompt = header + f"Preview of main content:\n {self_body}\n\n"
-        else:
-            prompt = header
-        if len(enc.encode(prompt)) > max_tokens:
-            prompt = enc.decode(enc.encode(prompt)[:max_tokens])
-        
-        response = openai_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are an assistant who perfectly summarizes scientific paper, "
-                        f"and gives the core idea of the paper to the user. "
-                        f"Your answer MUST be entirely written in {lang}. "
-                        f"Respond with exactly one sentence, no preamble."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            **llm_params.get('generation_kwargs', {})
-        )
-        tldr = response.choices[0].message.content
-        return tldr
-    
-    def generate_tldr(self, openai_client:OpenAI,llm_params:dict) -> str:
-        try:
-            tldr = self._generate_tldr_with_llm(openai_client,llm_params)
-            self.tldr = tldr
-            return tldr
-        except Exception as e:
-            logger.warning(f"Failed to generate tldr of {self.url}: {e}")
-            tldr = self.abstract
-            self.tldr = tldr
-            return tldr
-
-    def _generate_affiliations_with_llm(self, openai_client:OpenAI,llm_params:dict) -> list[str] | None:
-        if self.full_text is not None:
-            prompt = (
-                f"Given the beginning of a paper, extract the affiliations of the authors "
-                f"in a python list format, which is sorted by the author order. "
-                f"If there is no affiliation found, return an empty list '[]':\n\n{self.full_text}"
-            )
-            # use gpt-4o tokenizer for estimation
-            enc = tiktoken.encoding_for_model("gpt-4o")
-            prompt_tokens = enc.encode(prompt)
-            prompt_tokens = prompt_tokens[:2000]  # truncate to 2000 tokens
-            prompt = enc.decode(prompt_tokens)
-            affiliations = openai_client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an assistant who perfectly extracts affiliations of authors "
-                            "from a paper. You should return a python list of affiliations sorted "
-                            "by the author order, like [\"TsingHua University\",\"Peking University\"]. "
-                            "If an affiliation is consisted of multi-level affiliations, like "
-                            "'Department of Computer Science, TsingHua University', you should "
-                            "return the top-level affiliation 'TsingHua University' only. "
-                            "Do not contain duplicated affiliations. If there is no affiliation "
-                            "found, you should return an empty list [ ]. You should only return "
-                            "the final list of affiliations, and do not return any intermediate results."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                **llm_params.get('generation_kwargs', {})
-            )
-            affiliations = affiliations.choices[0].message.content
-
-            affiliations = re.search(r'\[.*?\]', affiliations, flags=re.DOTALL).group(0)
-            affiliations = json.loads(affiliations)
-            affiliations = list(set(affiliations))
-            affiliations = [str(a) for a in affiliations]
-
-            return affiliations
-    
-    def generate_affiliations(self, openai_client:OpenAI,llm_params:dict) -> list[str] | None:
-        try:
-            affiliations = self._generate_affiliations_with_llm(openai_client,llm_params)
-            self.affiliations = affiliations
-            return affiliations
-        except Exception as e:
-            logger.warning(f"Failed to generate affiliations of {self.url}: {e}")
-            self.affiliations = None
-            return None
 @dataclass
 class CorpusPaper:
+    """One paper from the user's Zotero library (used to build the research profile)."""
+
     title: str
     abstract: str
     added_date: datetime
     paths: list[str]
+
+
+@dataclass
+class RawPaperItem:
+    """A raw paper item as returned by a retriever (before conversion to Paper).
+
+    ``id`` and ``url`` are required; the retriever subclass decides what extra
+    fields to populate (``abstract``, ``authors``, ``pdf_url``, ``raw_text``,
+    etc.) before calling ``convert_to_paper``.
+    """
+
+    id: str
+    url: str

@@ -25,22 +25,17 @@ email:
 llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx
-    base_url: ??? # API URL of your LLM API. Example: https://api.openai.com/v1
+    base_url: ??? # API URL of your LLM API. Example: https://openrouter.ai/api/v1
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
-    model: ???
-  language: English # Preferred language for the TL;DR. Example: English
+    model: ??? # The model for the harness agent (e.g. gpt-5.6-luna on OpenRouter)
+  language: English # Preferred language for the digest (intro / reasons / outro). Example: English
   harness:
-    enabled: false # LLM Harness: stage-2 smart rerank (research profile + LLM scoring) on top of the embedding rerank. Example: true
-    top_k: 100 # How many embedding-ranked candidates to send to the LLM for scoring. Example: 100
-    batch_size: 25 # Candidates per LLM scoring call. Example: 25
-    api:
-    # Fully independent provider entry for the harness stage — do NOT share
-    # with reranker.api or llm.api. Each stage keeps its own provider/model.
-      key: null # API Key of the harness LLM (e.g. OpenRouter). Example: sk-xxx
-      base_url: null # API URL of the harness LLM. Example: https://openrouter.ai/api/v1
-      model: null # The model for recommendation reasoning. Example: gpt-5.6-luna
+    enabled: true # Single HarnessAgent: reads your Zotero profile + candidates and writes the whole digest. Example: true
+    top_k: 100 # How many embedding-ranked candidates to show the agent. Example: 100
+    full_text_budget: 10 # How many top candidates to prefetch full text for (agent can inspect deeper). Example: 10
+    max_steps: 12 # Max agent loop iterations (tools + final digest). Example: 12
 
 reranker:
   local:

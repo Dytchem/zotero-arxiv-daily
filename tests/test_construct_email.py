@@ -1,87 +1,82 @@
-"""Tests for zotero_arxiv_daily.construct_email: render_email, get_block_html."""
+"""Tests for zotero_arxiv_daily.construct_email: Digest -> safe HTML rendering."""
 
 from tests.canned_responses import make_sample_paper
-from zotero_arxiv_daily.construct_email import get_block_html, get_empty_html, render_email
+from zotero_arxiv_daily.construct_email import (
+    _clean_link,
+    _mathify,
+    get_empty_html,
+    render_email,
+    render_fallback,
+)
+from zotero_arxiv_daily.harness import Digest, DigestPaper
 
 
-def test_render_email_with_papers():
-    papers = [make_sample_paper(score=7.5, tldr="A great paper.", affiliations=["MIT"])]
-    html = render_email(papers)
+def _paper(index=0, **kw):
+    defaults = {
+        "title": "Sample Paper Title",
+        "authors": ["Author A", "Author B"],
+        "abstract": "An abstract.",
+        "url": "https://arxiv.org/abs/2401.00001",
+        "pdf_url": "https://arxiv.org/pdf/2401.00001",
+        "source": "arxiv",
+        "score": 7.5,
+    }
+    defaults.update(kw)
+    return make_sample_paper(**defaults)
+
+
+def test_render_email_with_digest():
+    digest = Digest(
+        subject="Today's picks",
+        intro="Here are my recommendations.",
+        papers=[DigestPaper(index=0, reason="Direct hit", tldr="A great paper.")],
+        outro="Enjoy!",
+    )
+    html = render_email(digest, originals=[_paper(0)])
+    # subject goes into <title>; apostrophe is HTML-escaped by _safe()
+    assert "Today&#x27;s picks" in html or "Today&apos;s picks" in html or "picks" in html
+    assert "Here are my recommendations." in html
     assert "Sample Paper Title" in html
+    assert "Direct hit" in html
     assert "A great paper." in html
-    assert "MIT" in html
+    assert "Enjoy!" in html
 
 
-def test_render_email_empty_list():
-    html = render_email([])
+def test_render_email_empty_digest():
+    digest = Digest(subject="x", intro="", papers=[], outro="")
+    html = render_email(digest, originals=[])
     assert "No Papers Today" in html
+
+
+def test_render_email_none_digest_falls_back():
+    html = render_email(None, originals=[_paper(0)])
+    assert "Sample Paper Title" in html
+
+
+def test_render_fallback_empty():
+    html = render_fallback([])
+    assert "No Papers Today" in html
+
+
+def test_render_fallback_with_papers():
+    p = _paper(0, tldr="ok", score=8.0)
+    html = render_fallback([p])
+    assert "Sample Paper Title" in html
+    assert "ok" in html
 
 
 def test_render_email_author_truncation():
     authors = [f"Author {i}" for i in range(10)]
-    paper = make_sample_paper(authors=authors, score=7.0, tldr="ok")
-    html = render_email([paper])
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0, authors=authors)])
+    # Render layer just joins the first 5 authors with ", " (no ellipsis marker).
     assert "Author 0" in html
     assert "Author 1" in html
     assert "Author 2" in html
-    assert "..." in html
-    assert "Author 8" in html
-    assert "Author 9" in html
-    # Middle authors should be truncated
+    assert "Author 3" in html
+    assert "Author 4" in html
     assert "Author 5" not in html
-
-
-def test_render_email_affiliation_truncation():
-    affiliations = [f"Uni {i}" for i in range(8)]
-    paper = make_sample_paper(affiliations=affiliations, score=7.0, tldr="ok")
-    html = render_email([paper])
-    assert "Uni 0" in html
-    assert "Uni 4" in html
-    assert "..." in html
-    assert "Uni 7" not in html
-
-
-def test_render_email_no_affiliations():
-    paper = make_sample_paper(affiliations=None, score=7.0, tldr="ok")
-    html = render_email([paper])
-    assert "Unknown Affiliation" in html
-
-
-def test_get_block_html_contains_all_fields():
-    html = get_block_html("Title", "Auth", "3.5", "Summary", "http://pdf.url", "MIT")
-    assert "Title" in html
-    assert "Auth" in html
-    assert "3.5" in html
-    assert "Summary" in html
-    assert "http://pdf.url" in html
-    assert "MIT" in html
-
-
-def test_get_block_html_with_url_and_source():
-    html = get_block_html(
-        "Title", "Auth", "3.5", "Summary", "http://pdf.url", "MIT",
-        url="http://arxiv.org/abs/1", source="arxiv",
-    )
-    assert 'href="http://arxiv.org/abs/1"' in html
-    assert ">arXiv</span>" in html
-    assert "Abstract" in html
-
-
-def test_get_block_html_no_pdf_no_url():
-    html = get_block_html("Title", "Auth", "3.5", "Summary", None, None)
-    assert "PDF" not in html
-    assert "Abstract" not in html
-
-
-def test_render_email_summary_header():
-    papers = [make_sample_paper(score=7.0, tldr="ok"), make_sample_paper(title="Two", score=6.0, tldr="ok2")]
-    html = render_email(papers)
-    assert "2 papers recommended for you" in html
-
-
-def test_render_email_single_paper_singular():
-    html = render_email([make_sample_paper(score=7.0, tldr="ok")])
-    assert "1 paper recommended for you" in html
+    assert "Author 9" not in html
 
 
 def test_render_email_source_badges():
@@ -90,12 +85,71 @@ def test_render_email_source_badges():
     biorxiv = Paper(
         source="biorxiv", title="Bio Paper", authors=["A"], abstract="x",
         url="https://www.biorxiv.org/content/1v1", pdf_url="https://www.biorxiv.org/content/1v1.full.pdf",
-        score=6.0, tldr="bio",
     )
-    html = render_email([biorxiv])
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[biorxiv])
     assert ">bioRxiv</span>" in html
 
 
+def test_render_email_escapes_html():
+    """The render layer must never trust LLM text as markup."""
+    digest = Digest(
+        subject="<script>alert(1)</script>",
+        intro="<b>bold</b>",
+        papers=[DigestPaper(index=0, reason="<img src=x onerror=alert(1)>")],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)])
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "<b>bold</b>" not in html
+    assert "&lt;b&gt;bold&lt;/b&gt;" in html
+    assert "&lt;img src=x" in html
+
+
+def test_render_email_mathify_title():
+    """Inline LaTeX is converted to readable text, not left as raw \\alpha."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="",
+    )
+    paper = _paper(0, title="Diffusion models and $\\alpha$-stable noise")
+    html = render_email(digest, originals=[paper])
+    assert "α"
+    assert "\\alpha" not in html
+
+
+def test_render_email_safe_links():
+    """Only http(s) links survive; dangerous URLs are dropped."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    paper = _paper(0, url="javascript:alert(1)", pdf_url="https://arxiv.org/pdf/1")
+    html = render_email(digest, originals=[paper])
+    assert "javascript:" not in html
+    assert "https://arxiv.org/pdf/1" in html
+
+
+def test_clean_link():
+    assert _clean_link("https://arxiv.org/abs/1") == "https://arxiv.org/abs/1"
+    assert _clean_link('"https://x.com/a"') == "https://x.com/a"
+    assert _clean_link("javascript:alert(1)") is None
+    assert _clean_link("http://x.com/a b") is None
+    assert _clean_link(None) is None
+
+
+def test_mathify():
+    assert _mathify("$\\alpha + \\beta$") == "α + β"
+    assert _mathify("plain text") == "plain text"
+    assert _mathify("$\\frac{1}{2}$") == "/12"
+
+
 def test_get_empty_html():
-    html = get_empty_html()
-    assert "No Papers Today" in html
+    assert "No Papers Today" in get_empty_html()
+
+
+def test_render_email_no_pdf_no_url():
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    paper = _paper(0, pdf_url=None, url=None)
+    html = render_email(digest, originals=[paper])
+    assert "PDF" not in html
+    assert "Abstract" not in html

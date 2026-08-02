@@ -54,7 +54,7 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
-ignore = ["B008", "UP047"]
+ignore = ["B008", "UP047", "RUF001"]
 
 [tool.ruff.lint.per-file-ignores]
 # HTML email templates: inline styles cannot be wrapped without breaking them

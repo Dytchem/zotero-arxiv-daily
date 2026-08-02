@@ -1,3 +1,24 @@
+"""Safe HTML rendering of the agent-produced Digest.
+
+This module is a *pure rendering layer*. It takes the agent's structured
+``Digest`` (subject / intro / per-paper cards / outro) and turns it into
+polished HTML email. It deliberately does NOT do any editorial work and does
+NOT trust raw markup from the LLM:
+
+- every text field is HTML-escaped (& < > " '),
+- LaTeX math is converted to a readable plain-text form,
+- links are validated (only http/https, stripped of dangerous chars),
+- ``score``/``Relevance`` is always rendered defensively (handles None).
+
+The agent never writes HTML directly — it writes JSON; this layer owns markup.
+"""
+
+from __future__ import annotations
+
+import html
+import re
+
+from .harness import Digest
 from .protocol import Paper
 
 framework = """
@@ -11,11 +32,13 @@ framework = """
 <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
   <div style="background:#ffffff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
     <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);padding:22px 28px;">
-      <div style="color:#ffffff;font-size:22px;font-weight:700;">Daily arXiv</div>
+      <div style="color:#ffffff;font-size:22px;font-weight:700;">__TITLE__</div>
       <div style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:4px;">__SUMMARY__</div>
     </div>
     <div style="padding:24px 28px;">
+      __INTRO__
       __CONTENT__
+      __OUTRO__
     </div>
   </div>
   <div style="text-align:center;color:#9ca3af;font-size:12px;padding:16px 0 8px;">
@@ -32,8 +55,62 @@ _SOURCE_LABELS = {
     "medrxiv": "medRxiv",
 }
 
+# Simple LaTeX command -> unicode substitutions for common math.
+_LATEX_SUBS = {
+    r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ",
+    r"\epsilon": "ε", r"\theta": "θ", r"\lambda": "λ", r"\mu": "μ",
+    r"\sigma": "σ", r"\phi": "φ", r"\omega": "ω", r"\pi": "π",
+    r"\infty": "∞", r"\times": "×", r"\cdot": "·", r"\leq": "≤",
+    r"\geq": "≥", r"\neq": "≠", r"\approx": "≈", r"\pm": "±",
+    r"\sum": "∑", r"\int": "∫", r"\sqrt": "√", r"\frac": "/",
+}
 
-def get_empty_html():
+
+def _safe(text: str | None) -> str:
+    """HTML-escape a text field, keeping the output safe to inline."""
+    return html.escape(text or "", quote=True)
+
+
+def _mathify(text: str) -> str:
+    """Convert common inline LaTeX to readable unicode, keeping the rest plain.
+
+    Only replaces $...$ spans and known commands; unknown commands are kept
+    as-is (escaped) so nothing breaks the HTML and no raw backslashes leak
+    into the rendered subject/title text in a confusing way. The goal is
+    *readability*, not full LaTeX rendering.
+    """
+    if not text:
+        return text
+
+    def _sub(match: re.Match) -> str:
+        inner = match.group(1) or match.group(2) or ""
+        out = inner
+        for cmd, uni in _LATEX_SUBS.items():
+            out = out.replace(cmd, uni)
+        # collapse stray braces
+        out = out.replace("{", "").replace("}", "")
+        out = out.replace("\\", "")
+        return out
+
+    # $...$ or \( ... \)
+    out = re.sub(r"\$(.+?)\$", lambda m: _sub(m), text)
+    out = re.sub(r"\\\((.+?)\\\)", lambda m: _sub(m), out)
+    return out
+
+
+def _clean_link(url: str | None) -> str | None:
+    """Return a safe http(s) URL; None otherwise (also strips quotes/brackets)."""
+    if not url:
+        return None
+    url = url.strip().strip('"').strip("'").strip("<>")
+    if not re.match(r"^https?://", url, flags=re.IGNORECASE):
+        return None
+    if re.search(r"[\s\"'<>]", url):
+        return None
+    return url
+
+
+def get_empty_html() -> str:
     return """
     <div style="text-align:center;padding:40px 20px;">
       <div style="font-size:20px;font-weight:700;color:#111827;">No Papers Today. Take a Rest!</div>
@@ -42,114 +119,142 @@ def get_empty_html():
     """
 
 
-def get_block_html(
-    title: str,
-    authors: str,
-    rate: str,
-    tldr: str,
-    pdf_url: str | None,
-    affiliations: str | None = None,
-    url: str | None = None,
-    source: str | None = None,
-    reason: str | None = None,
-):
-    title_html = (
-        f'<a href="{url}" style="color:#111827;text-decoration:none;">{title}</a>'
-        if url
-        else title
+def _rate_html(score: float | None) -> str:
+    if score is None:
+        return '<span style="display:inline-block;background:#eef2ff;color:#4f46e5;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">Relevance: n/a</span>'
+    try:
+        rate = round(float(score), 1)
+    except (TypeError, ValueError):
+        rate = "n/a"
+    return (
+        f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;'
+        f'font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">'
+        f'Relevance: {rate}</span>'
     )
+
+
+def _get_block_html(title, authors, reason, tldr, url, pdf_url, source) -> str:
+    title_text = _mathify(title)
+    title_html = title_text
+    clean_url = _clean_link(url)
+    if clean_url:
+        title_html = f'<a href="{clean_url}" style="color:#111827;text-decoration:none;">{title_text}</a>'
+
     badge_html = ""
     if source:
         label = _SOURCE_LABELS.get(source, source)
         badge_html = (
             f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;'
             f'font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;'
-            f'margin-bottom:6px;">{label}</span>'
+            f'margin-bottom:6px;">{_safe(label)}</span>'
         )
+
     reason_html = ""
     if reason:
         reason_html = (
             f'<div style="margin-top:10px;font-size:13px;color:#6d28d9;'
             f'background:#faf5ff;border-left:4px solid #a855f7;padding:8px 12px;'
-            f'border-radius:6px;"><strong>Why:</strong> {reason}</div>'
+            f'border-radius:6px;"><strong>Why:</strong> {_safe(reason)}</div>'
         )
-    pdf_button = ""
-    if pdf_url:
-        pdf_button = (
-            f'<a href="{pdf_url}" style="display:inline-block;text-decoration:none;font-size:13px;'
+
+    tldr_html = ""
+    if tldr:
+        tldr_html = (
+            f'<div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;'
+            f'background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">'
+            f'<strong>TLDR:</strong> {_safe(tldr)}</div>'
+        )
+
+    buttons = ""
+    clean_pdf = _clean_link(pdf_url)
+    if clean_pdf:
+        buttons += (
+            f'<a href="{clean_pdf}" style="display:inline-block;text-decoration:none;font-size:13px;'
             f'font-weight:700;color:#ffffff;background:linear-gradient(135deg,#2563eb,#4f46e5);'
             f'padding:9px 18px;border-radius:8px;">PDF</a>'
         )
-    abs_button = (
-        f'<a href="{url}" style="display:inline-block;text-decoration:none;font-size:13px;'
-        f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 18px;'
-        f'border-radius:8px;margin-left:8px;">Abstract</a>'
-        if url
-        else ""
-    )
-    block_template = """
-    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
-      {badge}
-      <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title}</div>
-      <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">
-        {authors}
-        <div style="margin-top:2px;font-style:italic;">{affiliations}</div>
-      </div>
-      <div style="margin-top:10px;">
-        <span style="display:inline-block;background:#eef2ff;color:#4f46e5;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">Relevance: {rate}</span>
-      </div>
-      {reason}
-      <div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">
-        <strong>TLDR:</strong> {tldr}
-      </div>
-      <div style="margin-top:14px;">
-        {pdf_button}{abs_button}
-      </div>
-    </div>
-    """
-    return block_template.format(
-        badge=badge_html,
-        title=title_html,
-        authors=authors,
-        rate=rate,
-        tldr=tldr,
-        affiliations=affiliations,
-        reason=reason_html,
-        pdf_button=pdf_button,
-        abs_button=abs_button,
-    )
-
-
-def render_email(papers: list[Paper]) -> str:
-    parts = []
-    if len(papers) == 0:
-        html = framework.replace("__CONTENT__", get_empty_html())
-        return html.replace("__SUMMARY__", "No new papers today")
-
-    total = len(papers)
-    summary = f"{total} paper{'s' if total > 1 else ''} recommended for you"
-    for p in papers:
-        rate = round(p.score, 1) if p.score is not None else 'Unknown'
-        author_list = list(p.authors)
-        num_authors = len(author_list)
-        if num_authors <= 5:
-            authors = ', '.join(author_list)
-        else:
-            authors = ', '.join([*author_list[:3], '...', *author_list[-2:]])
-        if p.affiliations is not None:
-            affiliations = p.affiliations[:5]
-            affiliations = ', '.join(affiliations)
-            if len(p.affiliations) > 5:
-                affiliations += ', ...'
-        else:
-            affiliations = 'Unknown Affiliation'
-        parts.append(
-            get_block_html(
-                p.title, authors, rate, p.tldr, p.pdf_url, affiliations,
-                url=p.url, source=p.source, reason=p.recommend_reason,
-            )
+    if clean_url:
+        margin = "margin-left:8px;" if buttons else ""
+        buttons += (
+            f'<a href="{clean_url}" style="display:inline-block;text-decoration:none;font-size:13px;'
+            f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 18px;'
+            f'border-radius:8px;{margin}">Abstract</a>'
         )
 
-    content = ''.join(parts)  # cards carry their own spacing
-    html = framework.replace('__CONTENT__', content)
-    return html.replace('__SUMMARY__', summary)
+    return f"""
+    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
+      {badge_html}
+      <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
+      <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>
+      <div style="margin-top:10px;">{_rate_html(None)}</div>
+      {reason_html}
+      {tldr_html}
+      <div style="margin-top:14px;">{buttons}</div>
+    </div>
+    """
+
+
+def render_email(digest: Digest | None, originals: list[Paper] | None = None) -> str:
+    """Render a Digest (or a plain fallback list) to HTML email.
+
+    ``digest`` is the agent's structured output; when it is None we render the
+    ``originals`` list as simple embedding-ordered cards (the graceful fallback).
+    """
+    if digest is None:
+        return render_fallback(originals or [])
+
+    title = _safe(_mathify(digest.subject)) or "Daily paper digest"
+    summary = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+    intro = _safe(_mathify(digest.intro))
+    outro = _safe(_mathify(digest.outro))
+
+    cards = ""
+    if digest.papers:
+        # Map candidate index -> original Paper so we can pull authors/url/pdf/source.
+        originals_by_index = dict(enumerate(originals or []))
+        for dp in digest.papers:
+            paper = originals_by_index.get(dp.index)
+            title_text = paper.title if paper else f"Paper {dp.index}"
+            authors = ", ".join((paper.authors or [])[:5]) if paper else ""
+            reason = dp.reason or (paper.recommend_reason if paper else "")
+            cards += _get_block_html(
+                title=title_text,
+                authors=authors,
+                reason=reason,
+                tldr=dp.tldr,
+                url=(paper.url if paper else None),
+                pdf_url=(paper.pdf_url if paper else None),
+                source=(paper.source if paper else None),
+            )
+    else:
+        cards = get_empty_html()
+
+    content = cards
+    html = framework.replace("__TITLE__", title)
+    html = html.replace("__SUMMARY__", summary)
+    html = html.replace("__INTRO__", f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "")
+    html = html.replace("__OUTRO__", f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "")
+    return html.replace("__CONTENT__", content)
+
+
+def render_fallback(papers: list[Paper]) -> str:
+    """Gentle fallback: embedding-ordered cards with no agent editorial."""
+    if not papers:
+        return framework.replace("__TITLE__", "Daily paper digest").replace(
+            "__SUMMARY__", "No new papers today"
+        ).replace("__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", get_empty_html())
+
+    body = ""
+    for _i, p in enumerate(papers):
+        body += _get_block_html(
+            title=p.title,
+            authors=", ".join((p.authors or [])[:5]),
+            reason=p.recommend_reason,
+            tldr=p.tldr,
+            url=p.url,
+            pdf_url=p.pdf_url,
+            source=p.source,
+        )
+    return framework.replace("__TITLE__", "Daily paper digest").replace(
+        "__SUMMARY__", f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"
+    ).replace("__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", body)

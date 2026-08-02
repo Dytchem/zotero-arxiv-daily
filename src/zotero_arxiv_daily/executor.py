@@ -410,6 +410,15 @@ class Executor:
         logger.info("Rendering email...")
         html_content = render_email(digest, originals=ranked)
 
+        # Archive the rendered email for debugging / review (also uploaded as
+        # a workflow artifact so we can inspect what the agent produced).
+        try:
+            cache_dir = Path(self.config.executor.get("cache_dir") or ".cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            (cache_dir / "last_email.html").write_text(html_content, encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"Failed to archive rendered email: {exc}")
+
         logger.info("Delivering digest...")
         self._deliver(html_content)
 

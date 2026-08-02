@@ -42,6 +42,14 @@ jobs:
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py
 
+      - name: Upload rendered email for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-email
+          path: .cache/last_email.html
+          if-no-files-found: ignore
+
       - name: Send failure notification
         if: failure()
         env:

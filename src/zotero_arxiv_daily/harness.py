@@ -280,7 +280,7 @@ class HarnessAgent:
                     "description": (
                         "List the day's candidate papers with their embedding relevance "
                         "score and a short abstract. Call this to see what is available "
-                        "before deciding what to recommend."
+                        "before deciding what to recommend. Page through with start/count."
                     ),
                     "parameters": {
                         "type": "object",
@@ -298,7 +298,8 @@ class HarnessAgent:
                     "name": "inspect_paper",
                     "description": (
                         "Show the full abstract (and preview of full text, if already "
-                        "fetched) for one candidate by its index."
+                        "fetched) for one candidate by its index. Use this to dig into a "
+                        "paper before deciding to recommend it."
                     ),
                     "parameters": {
                         "type": "object",
@@ -310,10 +311,45 @@ class HarnessAgent:
             {
                 "type": "function",
                 "function": {
+                    "name": "search_candidates",
+                    "description": (
+                        "Filter the candidate list by keywords (title + abstract substring "
+                        "match, case-insensitive). Returns only the matching papers. Use "
+                        "this to focus on a topic, e.g. \"quantum\" or \"nonadiabatic\"."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string", "description": "keyword(s) to match"}},
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "compare_papers",
+                    "description": (
+                        "Side-by-side view (title, score, abstract) of two candidates so "
+                        "you can weigh which one to recommend."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "index_a": {"type": "integer"},
+                            "index_b": {"type": "integer"},
+                        },
+                        "required": ["index_a", "index_b"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "submit_digest",
                     "description": (
                         "Submit the final digest: your editorial decision about which "
-                        "papers to recommend and the full email content. Call this once "
+                        "papers to recommend and the full email content. You may only "
+                        "submit after inspecting at least a few papers. Call this once "
                         "when done. It ends the loop."
                     ),
                     "parameters": {
@@ -370,19 +406,23 @@ class HarnessAgent:
             f"Today: {_today_str()}. The candidates are the newest papers from the "
             "user's subscribed feeds (on weekends/holidays arXiv publishes nothing, "
             "so the feed may roll back a few days — say so in the intro if so).\n\n"
-            "Tasks:\n"
-            "1. Use inspect_candidates to survey the day's papers (embedding score 0-10 "
-            "is a hint, not a command — use your judgement).\n"
-            "2. Use inspect_paper on any paper you are unsure about.\n"
-            "3. Decide which papers to recommend. Prefer a focused set of genuinely "
-            "relevant papers (typically 3-6) over a huge dump: quality over quantity. "
-            "Every pick must earn its place; unpicked candidates will still be listed "
-            "separately at the bottom of the email, so you are free to be selective. "
-            "A good reason must connect the paper to the user's actual interests — "
-            "say what the paper contributes and why it matters to this specific "
-            "researcher, not a generic abstract paraphrase. Keep each reason compact "
-            "(2-4 sentences); skip filler.\n"
-            "4. Write the digest in " + self.language + ". The subject should be "
+            "Workflow (follow it in order, like a careful researcher):\n"
+            "1. SURVEY: page through the day's papers with inspect_candidates "
+            "(embedding score 0-10 is a hint, not a command). Look at the whole "
+            "list, not just the top of the first page.\n"
+            "2. DEEP-DIVE: use inspect_paper on at least 3 papers you are seriously "
+            "considering. Read their abstracts (and full text when available) — do "
+            "not recommend a paper you have not inspected.\n"
+            "3. FOCUS: use search_candidates to zoom into a topic, and "
+            "compare_papers to weigh two candidates against each other when in doubt.\n"
+            "4. DECIDE: choose a focused set of genuinely relevant papers (typically "
+            "3-6) over a huge dump: quality over quantity. Every pick must earn its "
+            "place; unpicked candidates will still be listed separately at the bottom "
+            "of the email, so you are free to be selective. A good reason must connect "
+            "the paper to the user's actual interests — say what the paper contributes "
+            "and why it matters to this specific researcher, not a generic abstract "
+            "paraphrase. Keep each reason compact (2-4 sentences); skip filler.\n"
+            "5. WRITE: the digest in " + self.language + ". The subject should be "
             "short, informative, and in the same language; the intro should give "
             "context (what today's batch looks like overall); the outro should sign "
             "off warmly and look ahead.\n"
@@ -391,8 +431,10 @@ class HarnessAgent:
             "reader only sees the papers you pick, never the index list, so such "
             "references are meaningless and confusing. Refer to papers by their "
             "titles instead.\n"
-            "5. Call submit_digest with the finished subject, intro, per-paper "
-            "recommendation reasons, and outro.\n\n"
+            "6. SUBMIT: call submit_digest with the finished subject, intro, per-paper "
+            "recommendation reasons, and outro. You may only submit after you have "
+            "inspected at least 3 papers with inspect_paper; if you try to submit "
+            "earlier you will be asked to keep working.\n\n"
             "Quality bar: reasons should be specific and insightful, not generic. "
             "Never invent content that is not in the paper's abstract or full text. "
             "If nothing is worth recommending, submit an empty papers list with an "
@@ -402,6 +444,8 @@ class HarnessAgent:
         messages = [{"role": "system", "content": system_prompt}]
         digest: Digest | None = None
         max_steps = 12
+        min_inspections = 3
+        inspected: set[int] = set()
 
         # Keep full texts of inspected papers for tools.
         for step in range(max_steps):
@@ -431,6 +475,20 @@ class HarnessAgent:
                 name = tc.function.name
                 args = json.loads(tc.function.arguments or "{}")
                 if name == "submit_digest":
+                    if len(inspected) < min(min_inspections, len(candidates)):
+                        missing = min(min_inspections, len(candidates)) - len(inspected)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                f"Too early to submit: you have only inspected "
+                                f"{len(inspected)} paper(s) with inspect_paper. "
+                                f"Inspect at least {min(min_inspections, len(candidates))} "
+                                f"({missing} more) before submitting. Use inspect_paper "
+                                f"on the candidates you are most likely to recommend."
+                            ),
+                        })
+                        continue
                     digest = self._digest_from_args(args, len(candidates))
                     # Acknowledge and finish.
                     messages.append({
@@ -450,7 +508,25 @@ class HarnessAgent:
                     })
                 elif name == "inspect_paper":
                     idx = int(args.get("index", -1))
+                    if 0 <= idx < len(candidates):
+                        inspected.add(idx)
                     result = self._describe_paper(candidates, idx)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+                elif name == "search_candidates":
+                    result = self._search_candidates(candidates, str(args.get("query", "")))
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
+                elif name == "compare_papers":
+                    a = int(args.get("index_a", -1))
+                    b = int(args.get("index_b", -1))
+                    result = self._compare_papers(candidates, a, b)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -492,6 +568,38 @@ class HarnessAgent:
             f"Full abstract:\n{p.abstract}\n"
             f"Full-text preview:\n{_truncate(body, 4000)}"
         )
+
+    def _search_candidates(self, candidates: list[Paper], query: str) -> str:
+        """Filter candidates by keyword(s) in title+abstract (case-insensitive)."""
+        q = (query or "").strip().lower()
+        if not q:
+            return "Empty query. Pass a keyword to search for."
+        terms = [t for t in re.split(r"[\s,;]+", q) if t]
+        matches = []
+        for i, p in enumerate(candidates):
+            hay = f"{p.title} {p.abstract}".lower()
+            if all(t in hay for t in terms):
+                score = round(p.score, 1) if p.score is not None else "?"
+                matches.append(f"[{i}] {p.title} | embedding={score}/10 | {p.source}")
+        if not matches:
+            return f"No candidates match '{query}'."
+        return "\n".join(matches)
+
+    def _compare_papers(self, candidates: list[Paper], index_a: int, index_b: int) -> str:
+        """Side-by-side view of two candidates to weigh a choice."""
+        parts = []
+        for idx in (index_a, index_b):
+            if not (0 <= idx < len(candidates)):
+                parts.append(f"[{idx}] Index out of range (0..{len(candidates)-1}).")
+                continue
+            p = candidates[idx]
+            score = round(p.score, 1) if p.score is not None else "?"
+            parts.append(
+                f"[{idx}] {p.title} | embedding={score}/10 | {p.source}\n"
+                f"    {_authors_line(p)}\n"
+                f"    Abstract: {_truncate(p.abstract, 400)}"
+            )
+        return "\n\n---\n\n".join(parts)
 
     @staticmethod
     def _digest_from_args(args: dict, candidate_count: int) -> Digest:

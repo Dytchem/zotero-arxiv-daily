@@ -182,20 +182,20 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
     clean_url = _clean_link(url)
     if clean_pdf:
         buttons += (
-            f'<td style="padding-right:8px;"><a href="{clean_pdf}" class="btn" style="display:inline-block;text-decoration:none;font-size:13px;'
+            f'<td style="width:50%;padding-right:4px;"><a href="{clean_pdf}" class="btn" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;font-size:13px;'
             f'font-weight:700;color:#ffffff;background-color:#2563eb;background-image:linear-gradient(135deg,#2563eb,#4f46e5);'
-            f'padding:9px 18px;border-radius:8px;">PDF</a></td>'
+            f'padding:9px 0;border-radius:8px;">PDF</a></td>'
         )
     if clean_url:
         buttons += (
-            f'<td><a href="{clean_url}" class="btn" style="display:inline-block;text-decoration:none;font-size:13px;'
-            f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 18px;'
+            f'<td style="width:50%;padding-left:4px;"><a href="{clean_url}" class="btn" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;font-size:13px;'
+            f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 0;'
             f'border-radius:8px;">Abstract</a></td>'
         )
 
     if buttons:
         buttons = (
-            f'<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
+            f'<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">'
             f'<tr>{buttons}</tr></table>'
         )
 

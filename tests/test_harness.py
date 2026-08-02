@@ -167,9 +167,9 @@ def test_disabled_harness_has_no_client(config, tmp_path):
 
 
 def test_generate_runs_tools_and_submits_digest(config, tmp_path, monkeypatch):
-    """Agent inspects candidates, then submits a digest with a chosen subset."""
+    """Agent inspects candidates, deep-dives papers, then submits a digest."""
     tool_script = [
-        # step 1: inspect_candidates
+        # step 1: survey
         {
             "type": "assistant",
             "tool_calls": [
@@ -181,7 +181,43 @@ def test_generate_runs_tools_and_submits_digest(config, tmp_path, monkeypatch):
                 }
             ],
         },
-        # step 2: submit_digest
+        # step 2: deep-dive paper 0
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "inspect_paper",
+                        "arguments": '{"index": 0}',
+                    }
+                }
+            ],
+        },
+        # step 3: deep-dive paper 1
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "inspect_paper",
+                        "arguments": '{"index": 1}',
+                    }
+                }
+            ],
+        },
+        # step 4: compare 0 vs 1 (extra tool)
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "compare_papers",
+                        "arguments": '{"index_a": 0, "index_b": 1}',
+                    }
+                }
+            ],
+        },
+        # step 5: submit_digest
         {
             "type": "assistant",
             "tool_calls": [
@@ -215,6 +251,96 @@ def test_generate_runs_tools_and_submits_digest(config, tmp_path, monkeypatch):
     assert digest.papers[0].reason == "Directly extends your work on rerank."
     assert digest.papers[1].tldr == "A broad overview."
     assert digest.outro == "Enjoy!"
+
+
+def test_generate_rejects_early_submit_until_enough_inspections(config, tmp_path, monkeypatch):
+    """The agent cannot submit before inspecting enough papers — it is asked to
+    keep working and the loop continues until it complies."""
+    tool_script = [
+        # step 1: try to submit immediately (no inspections yet) -> rejected
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "submit_digest",
+                        "arguments": json_dumps({
+                            "subject": "Too early", "intro": "",
+                            "papers": [{"index": 0, "reason": "r"}], "outro": "",
+                        }),
+                    }
+                }
+            ],
+        },
+        # step 2: inspect paper 0
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "inspect_paper", "arguments": '{"index": 0}'}}
+            ],
+        },
+        # step 3: inspect paper 1
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "inspect_paper", "arguments": '{"index": 1}'}}
+            ],
+        },
+        # step 4: inspect paper 2 (third inspection -> gate opens)
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "inspect_paper", "arguments": '{"index": 2}'}}
+            ],
+        },
+        # step 5: submit now succeeds
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "submit_digest",
+                        "arguments": json_dumps({
+                            "subject": "Ready", "intro": "",
+                            "papers": [{"index": 0, "reason": "r"}], "outro": "",
+                        }),
+                    }
+                }
+            ],
+        },
+    ]
+    harness, _calls = _make_harness(config, tmp_path, monkeypatch, tool_script=tool_script)
+    papers = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(2))
+    assert digest is not None
+    # The final subject is "Ready", not "Too early" — proof the premature
+    # submit was rejected and the loop continued until the gate opened.
+    assert digest.subject == "Ready"
+
+
+def test_search_candidates_filters_by_keyword(config, tmp_path, monkeypatch):
+    tool_script = [
+        {"type": "assistant", "tool_calls": [{"function": {"name": "search_candidates", "arguments": '{"query": "quantum"}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 0}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 1}'}}]},
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "submit_digest", "arguments": json_dumps({
+                    "subject": "s", "intro": "",
+                    "papers": [{"index": 0, "reason": "r"}], "outro": "",
+                })}},
+            ],
+        },
+    ]
+    harness, _calls = _make_harness(config, tmp_path, monkeypatch, tool_script=tool_script)
+    papers = [
+        make_sample_paper(title="Quantum dynamics", url="https://arxiv.org/abs/1"),
+        make_sample_paper(title="Classical mechanics", url="https://arxiv.org/abs/2"),
+    ]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    assert digest.subject == "s"
 
 
 def test_generate_returns_none_when_disabled(config, tmp_path, monkeypatch):

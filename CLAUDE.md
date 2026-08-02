@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity between new papers and the user's existing library, generates TLDRs via LLM, and delivers results by email. Designed to run as a GitHub Actions workflow at zero cost.
+Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. A single **HarnessAgent** (OpenAI-compatible function-calling loop) reads the library profile, inspects embedding-ranked candidates with its own tools, decides what to recommend and why, and writes the complete digest — subject, intro, per-paper reasons, outro. A thin safe render layer turns that into a polished HTML email. Designed to run as a GitHub Actions workflow at zero cost.
 
 ## Commands
 
@@ -29,14 +29,14 @@ No linter or formatter is configured.
 
 ## Architecture
 
-The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily/executor.py`):
+The pipeline feeds cheap signals to ONE agent; every editorial decision is the agent's job (`src/zotero_arxiv_daily/executor.py`):
 
-1. **Fetch Zotero corpus** — retrieves user's library papers via pyzotero API
-2. **Filter corpus** — applies `include_path` glob patterns to select relevant collections
-3. **Retrieve new papers** — fetches from configured sources (arXiv RSS, bioRxiv/medRxiv REST API)
-4. **Rerank** — scores candidates by weighted similarity to corpus (newer Zotero papers weighted higher)
-5. **Generate TLDRs + affiliations** — via OpenAI-compatible LLM API
-6. **Render + send email** — HTML email via SMTP
+1. **Fetch Zotero corpus** — retrieves user's library papers via pyzotero API (empty abstracts fall back to the title so PDF imports are not dropped)
+2. **Filter corpus** — applies `include_path` / `ignore_path` glob patterns
+3. **Retrieve new papers** — fetches from configured sources (arXiv RSS + weekend API fallback, bioRxiv/medRxiv REST API)
+4. **Rerank** — embedding (+optional BM25 hybrid) similarity to corpus; this is a *hint* for the agent, not the final ranking
+5. **HarnessAgent digest** — `src/zotero_arxiv_daily/harness.py`: one agent loop with tools `inspect_candidates` / `inspect_paper` / `submit_digest`; produces a typed `Digest` (subject / intro / papers[DigestPaper] / outro). Single LLM provider (`llm.api`, e.g. OpenRouter `gpt-5.6-luna`). Falls back to embedding order on any failure.
+6. **Render + send** — `construct_email.py` is a pure safe render layer (HTML-escape, LaTeX→Unicode, link whitelist, localised labels via `llm.language`); delivered via notifiers (email / webhook) with the agent's subject line
 
 ### Plugin Systems
 

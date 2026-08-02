@@ -21,6 +21,10 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Lint
+        run: |
+          uvx ruff check src/ tests/
+
       - name: Run Pytest
         run: |
           uv run pytest -m "" --cov=src/zotero_arxiv_daily --cov-report=term-missing

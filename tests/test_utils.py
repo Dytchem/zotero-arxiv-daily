@@ -1,14 +1,13 @@
 """Tests for zotero_arxiv_daily.utils: glob_match, send_email, tex extraction."""
 
+import io
 import smtplib
 import tarfile
-import io
 
 import pytest
 
-from zotero_arxiv_daily.utils import glob_match, send_email, extract_tex_code_from_tar, _bm25_pick
 from tests.canned_responses import make_stub_smtp
-
+from zotero_arxiv_daily.utils import _bm25_pick, bm25_scores, extract_tex_code_from_tar, glob_match, send_email
 
 # ---------------------------------------------------------------------------
 # glob_match — migrated from test_glob_match.py
@@ -158,7 +157,6 @@ def test_send_email_falls_back_to_plain(config, monkeypatch):
     sent = []
     call_count = {"smtp": 0}
 
-    StubOK = make_stub_smtp(sent)
 
     class StubSMTP_TLS_Fails:
         def __init__(self, *a, **kw):
@@ -288,3 +286,23 @@ class TestBm25Pick:
         candidates = {"a.tex": "hello", "b.tex": "world"}
         result = _bm25_pick("", candidates)
         assert result in candidates
+
+
+class TestBm25Scores:
+    def test_shape(self):
+        scores = bm25_scores(["a b"], ["a b c", "x y z"])
+        assert scores.shape == (1, 2)
+
+    def test_lexical_match_scores_higher(self):
+        queries = ["quantum error correction"]
+        docs = [
+            "Quantum error correction with topological codes",
+            "Protein folding dynamics simulation",
+        ]
+        scores = bm25_scores(queries, docs)
+        assert scores[0, 0] > scores[0, 1]
+
+    def test_empty_query_returns_zeros(self):
+        scores = bm25_scores(["", "!!!", "a"], ["a b", "b c"])
+        assert scores[0].sum() == 0.0
+        assert scores[1].sum() == 0.0

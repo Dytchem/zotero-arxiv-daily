@@ -1,18 +1,21 @@
-from .base import BaseRetriever, register_retriever
-import arxiv
-from arxiv import Result as ArxivResult
-from ..protocol import Paper
-from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
-from tempfile import TemporaryDirectory
-import feedparser
-from tqdm import tqdm
 import multiprocessing
 import os
+from collections.abc import Callable
 from queue import Empty
+from tempfile import TemporaryDirectory
 from time import sleep
-from typing import Any, Callable, TypeVar
-from loguru import logger
+from typing import Any, TypeVar
+
+import arxiv
+import feedparser
 import requests
+from arxiv import Result as ArxivResult
+from loguru import logger
+from tqdm import tqdm
+
+from ..protocol import Paper
+from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
+from .base import BaseRetriever, register_retriever
 
 T = TypeVar("T")
 
@@ -136,7 +139,8 @@ class ArxivRetriever(BaseRetriever):
         max_batch_retries = 5
         batch_retry_delay = 30
         for i in range(0, len(all_paper_ids), 20):
-            search = arxiv.Search(id_list=all_paper_ids[i:i + 20])
+            batch_ids = all_paper_ids[i:i + 20]
+            search = arxiv.Search(id_list=batch_ids)
             for attempt in range(max_batch_retries):
                 try:
                     batch = list(client.results(search))
@@ -144,12 +148,28 @@ class ArxivRetriever(BaseRetriever):
                     raw_papers.extend(batch)
                     break
                 except arxiv.HTTPError as exc:
-                    if exc.status == 429 and attempt < max_batch_retries - 1:
-                        wait = batch_retry_delay * (attempt + 1)
-                        logger.warning(f"arXiv API 429 on batch {i // 20}, retry {attempt + 1}/{max_batch_retries} in {wait}s")
-                        sleep(wait)
-                    else:
-                        raise
+                    if attempt >= max_batch_retries - 1:
+                        # Give up on the batch: degrade to per-paper requests so a
+                        # single bad/removed ID cannot kill the whole run.
+                        logger.warning(
+                            f"arXiv API batch {i // 20} failed after {max_batch_retries} "
+                            f"attempts (HTTP {exc.status}); falling back to per-paper requests"
+                        )
+                        for pid in batch_ids:
+                            try:
+                                single = list(client.results(arxiv.Search(id_list=[pid])))
+                                bar.update(len(single))
+                                raw_papers.extend(single)
+                            except Exception as single_exc:
+                                logger.warning(f"Skipping arXiv paper {pid}: {single_exc}")
+                            sleep(1)
+                        break
+                    wait = batch_retry_delay * (attempt + 1)
+                    logger.warning(
+                        f"arXiv API {exc.status} on batch {i // 20}, "
+                        f"retry {attempt + 1}/{max_batch_retries} in {wait}s"
+                    )
+                    sleep(wait)
             if i + 20 < len(all_paper_ids):
                 sleep(3)
         bar.close()

@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from omegaconf import DictConfig
-from ..protocol import Paper, RawPaperItem
-from tqdm import tqdm
-from typing import Type
 from time import sleep
+
 from loguru import logger
+from omegaconf import DictConfig
+from tqdm import tqdm
+
+from ..protocol import Paper, RawPaperItem
 
 
 class BaseRetriever(ABC):
@@ -54,7 +55,7 @@ def register_retriever(name:str):
         return cls
     return decorator
 
-def get_retriever_cls(name:str) -> Type[BaseRetriever]:
+def get_retriever_cls(name:str) -> type[BaseRetriever]:
     if name not in registered_retrievers:
         raise ValueError(f"Retriever {name} not found")
     return registered_retrievers[name]

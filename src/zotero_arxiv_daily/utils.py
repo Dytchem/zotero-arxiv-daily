@@ -1,17 +1,20 @@
-import tarfile
-import re
+import datetime
 import glob
 import math
+import re
 import smtplib
+import tarfile
 from collections import Counter
 from email.header import Header
 from email.mime.text import MIMEText
-from email.utils import parseaddr, formataddr
-from loguru import logger
-import datetime
-from omegaconf import DictConfig
+from email.utils import formataddr, parseaddr
+
+import numpy as np
 import pymupdf
 import pymupdf.layout
+from loguru import logger
+from omegaconf import DictConfig
+
 pymupdf.TOOLS.mupdf_display_errors(False)
 pymupdf.layout.activate()
 
@@ -21,6 +24,32 @@ _TOKEN_RE = re.compile(r'[a-zA-Z0-9]+')
 
 def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text)]
+
+
+def bm25_scores(query_texts: list[str], doc_texts: list[str], k1: float = 1.5, b: float = 0.75) -> np.ndarray:
+    """BM25 relevance matrix [n_query, n_doc] using the same tokenizer as _bm25_pick."""
+    doc_tokens = [_tokenize(content) for content in doc_texts]
+    N = len(doc_tokens)
+    avgdl = sum(len(t) for t in doc_tokens) / max(N, 1)
+
+    df: Counter[str] = Counter()
+    for tokens in doc_tokens:
+        df.update(set(tokens))
+
+    scores = np.zeros((len(query_texts), N))
+    for i, q_tokens in enumerate(_tokenize(q) for q in query_texts):
+        q_tokens = set(q_tokens)
+        if not q_tokens:
+            continue
+        tf_counts = [Counter(t) for t in doc_tokens]
+        for q in q_tokens:
+            n_q = df.get(q, 0)
+            idf = math.log((N - n_q + 0.5) / (n_q + 0.5) + 1)
+            for j, tf in enumerate(tf_counts):
+                f_q = tf.get(q, 0)
+                dl = len(doc_tokens[j])
+                scores[i, j] += idf * (f_q * (k1 + 1)) / (f_q + k1 * (1 - b + b * dl / max(avgdl, 1)))
+    return scores
 
 
 def _bm25_pick(query: str, candidates: dict[str, str], k1: float = 1.5, b: float = 0.75) -> str:
@@ -55,7 +84,7 @@ def _bm25_pick(query: str, candidates: dict[str, str], k1: float = 1.5, b: float
 
 def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | None = None) -> dict[str,str]:
     try:
-        tar = tarfile.open(file_path)
+        tar = tarfile.open(file_path)  # noqa: SIM115  (tar stays open while sub-files are read)
     except tarfile.ReadError:
         logger.debug(f"Failed to find main tex file of {paper_id}: Not a tar file.")
         return None
@@ -119,10 +148,7 @@ def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | Non
         #find and replace all included sub-files
         include_files = re.findall(r'\\input\{(.+?)\}', main_source) + re.findall(r'\\include\{(.+?)\}', main_source)
         for f in include_files:
-            if not f.endswith('.tex'):
-                file_name = f + '.tex'
-            else:
-                file_name = f
+            file_name = f + '.tex' if not f.endswith('.tex') else f
             main_source = main_source.replace(f'\\input{{{f}}}', file_contents.get(file_name, ''))
         file_contents["all"] = main_source
     else:
@@ -150,8 +176,8 @@ def send_email(config:DictConfig, html:str):
         return formataddr((Header(name, 'utf-8').encode(), addr))
 
     msg = MIMEText(html, 'html', 'utf-8')
-    msg['From'] = _format_addr('Github Action <%s>' % sender)
-    msg['To'] = _format_addr('You <%s>' % receiver)
+    msg['From'] = _format_addr(f'Github Action <{sender}>')
+    msg['To'] = _format_addr(f'You <{receiver}>')
     today = datetime.datetime.now().strftime('%Y/%m/%d')
     msg['Subject'] = Header(f'Daily arXiv {today}', 'utf-8').encode()
 

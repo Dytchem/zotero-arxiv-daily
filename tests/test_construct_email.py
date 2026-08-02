@@ -1,7 +1,7 @@
 """Tests for zotero_arxiv_daily.construct_email: render_email, get_block_html."""
 
-from zotero_arxiv_daily.construct_email import render_email, get_block_html, get_empty_html
 from tests.canned_responses import make_sample_paper
+from zotero_arxiv_daily.construct_email import get_block_html, get_empty_html, render_email
 
 
 def test_render_email_with_papers():

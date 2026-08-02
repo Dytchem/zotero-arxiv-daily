@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
+from tests.canned_responses import make_sample_corpus, make_sample_paper
 from zotero_arxiv_daily.reranker.base import BaseReranker, get_reranker_cls
-from tests.canned_responses import make_sample_paper, make_sample_corpus
 
 
 class StubReranker(BaseReranker):
@@ -68,3 +68,50 @@ def test_rerank_single_candidate_single_corpus():
 def test_get_reranker_cls_unknown():
     with pytest.raises(ValueError, match="not found"):
         get_reranker_cls("nonexistent_reranker_xyz")
+
+
+def test_rerank_hybrid_uses_bm25(config):
+    """With rerank_alpha=0.0 the ranking is driven by BM25 lexical match."""
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.reranker.base import BaseReranker
+
+    class ZeroVectorReranker(BaseReranker):
+        def __init__(self, config):
+            self.config = config
+
+        def get_similarity_score(self, s1, s2):
+            return np.zeros((len(s1), len(s2)))
+
+    with open_dict(config.executor):
+        config.executor.rerank_alpha = 0.0  # pure BM25
+    corpus = make_sample_corpus(2)
+    papers = [
+        make_sample_paper(title="Lexical Hit", abstract="Abstract for corpus paper 0. corpus paper"),
+        make_sample_paper(title="No Hit", abstract="completely unrelated topic"),
+    ]
+    reranker = ZeroVectorReranker(config)
+    ranked = reranker.rerank(papers, corpus)
+    assert ranked[0].title == "Lexical Hit"
+
+
+def test_rerank_alpha_none_is_pure_vector(config):
+    """rerank_alpha=null disables hybrid mixing (backwards compatible)."""
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.reranker.base import BaseReranker
+
+    class FixedReranker(BaseReranker):
+        def __init__(self, config):
+            self.config = config
+
+        def get_similarity_score(self, s1, s2):
+            return np.array([[0.9, 0.1], [0.2, 0.8]])
+
+    with open_dict(config.executor):
+        config.executor.rerank_alpha = None
+    corpus = make_sample_corpus(2)
+    papers = [make_sample_paper(title=f"Paper {i}") for i in range(2)]
+    reranker = FixedReranker(config)
+    ranked = reranker.rerank(papers, corpus)
+    assert ranked[0].title == "Paper 0"

@@ -1,9 +1,12 @@
-import requests
-from .base import BaseRetriever, register_retriever
-from ..protocol import Paper
-from loguru import logger
-from typing import Any
 from time import sleep
+from typing import Any
+
+import requests
+from loguru import logger
+
+from ..protocol import Paper
+from .base import BaseRetriever, register_retriever
+
 
 @register_retriever("biorxiv")
 class BiorxivRetriever(BaseRetriever):
@@ -27,14 +30,14 @@ class BiorxivRetriever(BaseRetriever):
                 if i == retry_num - 1:
                     raise e
                 else:
-                    logger.warning(f"Failed to retrieve papers: {str(e)}. Retry in {delay_time} seconds.")
+                    logger.warning(f"Failed to retrieve papers: {e!s}. Retry in {delay_time} seconds.")
                     sleep(delay_time)
         result = response.json()
         collection = result['collection']
         if len(collection) == 0:
             logger.warning(f"No paper found. API Message: {result['messages']}")
             return []
-        all_dates = set(c['date'] for c in collection)
+        all_dates = {c['date'] for c in collection}
         latest_date = sorted(all_dates)[-1]
         collection = [c for c in collection if c['date'] == latest_date]
         categories = [c.lower() for c in self.retriever_config.category]

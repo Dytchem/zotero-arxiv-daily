@@ -8,7 +8,6 @@ from omegaconf import OmegaConf
 from zotero_arxiv_daily.executor import Executor, normalize_path_patterns
 from zotero_arxiv_daily.protocol import CorpusPaper
 
-
 # ---------------------------------------------------------------------------
 # normalize_path_patterns — migrated from test_include_path.py
 # ---------------------------------------------------------------------------
@@ -155,7 +154,6 @@ def test_run_end_to_end(config, monkeypatch):
     from omegaconf import open_dict
 
     from tests.canned_responses import (
-        make_sample_corpus,
         make_sample_paper,
         make_stub_openai_client,
         make_stub_smtp,
@@ -183,7 +181,6 @@ def test_run_end_to_end(config, monkeypatch):
 
     # Import to register the arxiv retriever
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
-
     from zotero_arxiv_daily.retriever.base import registered_retrievers
 
     monkeypatch.setattr(
@@ -230,7 +227,6 @@ def test_run_no_papers_send_empty_false(config, monkeypatch):
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
 
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
-
     from zotero_arxiv_daily.retriever.base import registered_retrievers
 
     monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
@@ -266,7 +262,6 @@ def test_run_no_papers_send_empty_true(config, monkeypatch):
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
 
     import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
-
     from zotero_arxiv_daily.retriever.base import registered_retrievers
 
     monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
@@ -334,3 +329,39 @@ def test_generate_summaries_runs_all_papers(config, monkeypatch):
     for p in papers:
         assert p.tldr is not None, p.title
         assert p.affiliations is not None, p.title
+
+
+def test_validate_config_missing_zotero_user_id(config):
+    import pytest
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.executor import Executor
+
+    with open_dict(config.zotero):
+        config.zotero.user_id = None
+    with pytest.raises(ValueError, match="zotero.user_id"):
+        Executor(config)
+
+
+def test_validate_config_missing_email_sender(config):
+    import pytest
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.executor import Executor
+
+    with open_dict(config.email):
+        config.email.sender = None
+    with pytest.raises(ValueError, match="email.sender"):
+        Executor(config)
+
+
+def test_validate_config_missing_reranker_api_model(config):
+    import pytest
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.executor import Executor
+
+    with open_dict(config.reranker.api):
+        config.reranker.api.model = None
+    with pytest.raises(ValueError, match="reranker.api.model"):
+        Executor(config)

@@ -1,11 +1,14 @@
+import logging
 import os
 import sys
-import logging
-from omegaconf import DictConfig
+
+import dotenv
 import hydra
 from loguru import logger
-import dotenv
+from omegaconf import DictConfig
+
 from zotero_arxiv_daily.executor import Executor
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 dotenv.load_dotenv()
 
@@ -17,7 +20,10 @@ def main(config:DictConfig):
     logger.add(
         sys.stdout,
         level=log_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        )
     )
     
     for logger_name in logging.root.manager.loggerDict:

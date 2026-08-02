@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from zotero_arxiv_daily.protocol import CorpusPaper, Paper
 
-
 # ---------------------------------------------------------------------------
 # OpenAI client stub
 # ---------------------------------------------------------------------------
@@ -165,18 +164,18 @@ def make_stub_smtp(sent_emails: list):
 
 
 def make_sample_paper(**overrides) -> Paper:
-    defaults = dict(
-        source="arxiv",
-        title="Sample Paper Title",
-        authors=["Author A", "Author B", "Author C"],
-        abstract="This paper explores a novel approach to widget engineering.",
-        url="https://arxiv.org/abs/2026.00001",
-        pdf_url="https://arxiv.org/pdf/2026.00001",
-        full_text="\\begin{document} Some text. \\end{document}",
-        tldr=None,
-        affiliations=None,
-        score=None,
-    )
+    defaults = {
+        "source": "arxiv",
+        "title": "Sample Paper Title",
+        "authors": ["Author A", "Author B", "Author C"],
+        "abstract": "This paper explores a novel approach to widget engineering.",
+        "url": "https://arxiv.org/abs/2026.00001",
+        "pdf_url": "https://arxiv.org/pdf/2026.00001",
+        "full_text": "\\begin{document} Some text. \\end{document}",
+        "tldr": None,
+        "affiliations": None,
+        "score": None,
+    }
     defaults.update(overrides)
     return Paper(**defaults)
 

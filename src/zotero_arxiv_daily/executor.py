@@ -1,16 +1,17 @@
-from loguru import logger
-from pyzotero import zotero
-from omegaconf import DictConfig, ListConfig
-from .utils import glob_match
-from .retriever import get_retriever_cls
-from .protocol import CorpusPaper, Paper
 import random
 from datetime import datetime
-from .reranker import get_reranker_cls
-from .construct_email import render_email
-from .utils import send_email
+
+from loguru import logger
+from omegaconf import DictConfig, ListConfig
 from openai import OpenAI
+from pyzotero import zotero
 from tqdm import tqdm
+
+from .construct_email import render_email
+from .protocol import CorpusPaper, Paper
+from .reranker import get_reranker_cls
+from .retriever import get_retriever_cls
+from .utils import glob_match, send_email
 
 
 def normalize_path_patterns(patterns: list[str] | ListConfig | None, config_key: str) -> list[str] | None:
@@ -39,6 +40,39 @@ class Executor:
         }
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
         self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
+        self._validate_config()
+
+    def _validate_config(self) -> None:
+        """Fail fast with a clear message instead of silently sending no email."""
+        def _missing(value) -> bool:
+            return value is None or (isinstance(value, str) and (not value or value.startswith("???")))
+
+        required: dict[str, object] = {
+            "zotero.user_id": self.config.zotero.get("user_id"),
+            "zotero.api_key": self.config.zotero.get("api_key"),
+            "email.sender": self.config.email.get("sender"),
+            "email.receiver": self.config.email.get("receiver"),
+            "email.smtp_server": self.config.email.get("smtp_server"),
+            "email.smtp_port": self.config.email.get("smtp_port"),
+            "email.sender_password": self.config.email.get("sender_password"),
+            "llm.api.key": self.config.llm.api.get("key"),
+            "llm.api.base_url": self.config.llm.api.get("base_url"),
+            "llm.generation_kwargs.model": self.config.llm.generation_kwargs.get("model"),
+        }
+        reranker = self.config.executor.get("reranker", "local")
+        if reranker == "api":
+            required["reranker.api.key"] = self.config.reranker.api.get("key")
+            required["reranker.api.base_url"] = self.config.reranker.api.get("base_url")
+            required["reranker.api.model"] = self.config.reranker.api.get("model")
+        else:
+            required["reranker.local.model"] = self.config.reranker.local.get("model")
+
+        missing = [path for path, value in required.items() if _missing(value)]
+        if missing:
+            raise ValueError(
+                "Missing required config: " + ", ".join(missing)
+                + ". Check CUSTOM_CONFIG variable and repository secrets."
+            )
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
         zot = zotero.Zotero(self.config.zotero.user_id, 'user', self.config.zotero.api_key)
@@ -121,6 +155,8 @@ class Executor:
             logger.warning(f"Failed to fetch full text for {paper.title}: {exc}")
 
     def run(self):
+        import time
+        t0 = time.time()
         corpus = self.fetch_zotero_corpus()
         corpus = self.filter_corpus(corpus)
         if len(corpus) == 0:
@@ -149,4 +185,8 @@ class Executor:
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)
         send_email(self.config, email_content)
+        logger.info(
+            f"[summary] corpus={len(corpus)} candidates={len(all_papers)} "
+            f"ranked={len(reranked_papers)} elapsed={time.time() - t0:.1f}s"
+        )
         logger.info("Email sent successfully")

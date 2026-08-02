@@ -147,3 +147,27 @@ def test_tldr_truncation_keeps_header(llm_params):
     assert "Sample Paper Title" in prompt               # title kept
     assert "UNIQUE_TRAILING_MARKER" not in prompt       # tail of body truncated
     assert "Preview of main content" in prompt          # structure preserved
+
+
+def test_tldr_language_respected(llm_params):
+    """Configured language reaches both the system and user prompts."""
+    from types import SimpleNamespace
+
+    from tests.canned_responses import _make_chat_response
+
+    seen: dict = {}
+
+    def recording_create(**kwargs):
+        seen["messages"] = kwargs["messages"]
+        return _make_chat_response("TLDR stub")
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=recording_create))
+    )
+    paper = make_sample_paper()
+    paper.generate_tldr(client, {"language": "Chinese", "generation_kwargs": {"model": "gpt-4o-mini"}})
+
+    system_prompt = seen["messages"][0]["content"]
+    user_prompt = seen["messages"][1]["content"]
+    assert "Chinese" in system_prompt
+    assert "in Chinese" in user_prompt

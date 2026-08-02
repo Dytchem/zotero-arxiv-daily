@@ -3,10 +3,8 @@
 import time
 from types import SimpleNamespace
 
-import feedparser
-
-from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever, _run_with_hard_timeout
 import zotero_arxiv_daily.retriever.arxiv_retriever as arxiv_retriever
+from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever, _run_with_hard_timeout
 
 
 def _sleep_and_return(value: str, delay_seconds: float) -> str:
@@ -28,8 +26,6 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
         e for e in mock_feedparser.entries
         if e.get("arxiv_announce_type", "new") == "new"
     ]
-    paper_ids = [e.id.removeprefix("oai:arXiv.org:") for e in new_entries]
-
     # Build fake ArxivResult-like objects matching each RSS entry
     fake_results = []
     for entry in new_entries:
@@ -60,7 +56,7 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
     papers = retriever.retrieve_papers()
 
     assert len(papers) == len(new_entries)
-    assert set(p.title for p in papers) == set(e.title for e in new_entries)
+    assert {p.title for p in papers} == {e.title for e in new_entries}
 
 
 def test_run_with_hard_timeout_returns_value():
@@ -129,3 +125,90 @@ def test_fetch_full_text_short_circuits_on_tar_hit(config, monkeypatch):
     )
     retriever = ArxivRetriever(config)
     assert retriever.fetch_full_text(make_sample_paper()) == "tar text"
+
+
+def _make_http_error(code: int, msg: str):
+    import arxiv
+    return arxiv.HTTPError("https://export.arxiv.org/api/query", 0, code)
+
+
+def _make_fake_result(pid: str):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        title=f"Paper {pid}",
+        authors=[SimpleNamespace(name="Test Author")],
+        summary="Test abstract",
+        pdf_url=f"https://arxiv.org/pdf/{pid}",
+        entry_id=f"https://arxiv.org/abs/{pid}",
+        source_url=lambda pid=pid: f"https://arxiv.org/e-print/{pid}",
+    )
+
+
+def test_batch_http_error_falls_back_to_per_paper(config, monkeypatch, mock_feedparser):
+    """Batch HTTP error (e.g. 406) -> per-paper fallback; single failures skipped."""
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+    monkeypatch.setattr(arxiv_retriever, "sleep", lambda _: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
+
+    new_entries = [e for e in mock_feedparser.entries if e.get("arxiv_announce_type", "new") == "new"]
+    ids = [e.id.removeprefix("oai:arXiv.org:") for e in new_entries]
+    broken_id = ids[0]
+
+    def flaky_results(search):
+        if len(search.id_list) > 1:
+            raise _make_http_error(406, "Not Acceptable")
+        pid = search.id_list[0]
+        if pid == broken_id:
+            raise _make_http_error(503, "Service Unavailable")
+        return iter([_make_fake_result(pid)])
+
+    class FlakyClient:
+        def __init__(self, **kw):
+            pass
+        def results(self, search):
+            return flaky_results(search)
+
+    monkeypatch.setattr(arxiv_retriever.arxiv, "Client", FlakyClient)
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    assert len(papers) == len(ids) - 1  # everything except the broken single paper
+
+
+def test_batch_retries_on_429_then_succeeds(config, monkeypatch, mock_feedparser):
+    """Batch HTTP 429 is retried with backoff, then succeeds."""
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+    monkeypatch.setattr(arxiv_retriever, "sleep", lambda _: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
+
+    new_entries = [e for e in mock_feedparser.entries if e.get("arxiv_announce_type", "new") == "new"]
+    ids = [e.id.removeprefix("oai:arXiv.org:") for e in new_entries]
+
+    attempts = {"n": 0}
+
+    def retry_results(search):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise _make_http_error(429, "Too Many Requests")
+        return iter([_make_fake_result(pid) for pid in ids])
+
+    class RetryClient:
+        def __init__(self, **kw):
+            pass
+        def results(self, search):
+            return retry_results(search)
+
+    monkeypatch.setattr(arxiv_retriever.arxiv, "Client", RetryClient)
+
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    assert attempts["n"] == 3
+    assert len(papers) == len(ids)

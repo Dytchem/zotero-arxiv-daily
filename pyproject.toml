@@ -49,6 +49,22 @@ filterwarnings = [
     "ignore::DeprecationWarning:multiprocessing",
 ]
 
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = ["B008", "UP047"]
+
+[tool.ruff.lint.per-file-ignores]
+# HTML email templates: inline styles cannot be wrapped without breaking them
+"src/zotero_arxiv_daily/construct_email.py" = ["E501"]
+# LaTeX/PDF extraction regexes and long comments
+"src/zotero_arxiv_daily/utils.py" = ["E501"]
+# test fixtures / long regexes
+"tests/**" = ["E501", "RUF043"]
+
 [dependency-groups]
 dev = [
     "ipykernel>=7.1.0",

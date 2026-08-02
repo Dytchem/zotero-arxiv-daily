@@ -1,11 +1,13 @@
-from dataclasses import dataclass
-from typing import Optional, TypeVar
-from datetime import datetime
-import re
-import tiktoken
-from openai import OpenAI
-from loguru import logger
 import json
+import re
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TypeVar
+
+import tiktoken
+from loguru import logger
+from openai import OpenAI
+
 RawPaperItem = TypeVar('RawPaperItem')
 
 @dataclass
@@ -15,12 +17,12 @@ class Paper:
     authors: list[str]
     abstract: str
     url: str
-    pdf_url: Optional[str] = None
-    full_text: Optional[str] = None
-    tldr: Optional[str] = None
-    affiliations: Optional[list[str]] = None
-    score: Optional[float] = None
-    source_url: Optional[str] = None
+    pdf_url: str | None = None
+    full_text: str | None = None
+    tldr: str | None = None
+    affiliations: list[str] | None = None
+    score: float | None = None
+    source_url: str | None = None
 
     def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
         lang = llm_params.get('language', 'English')
@@ -50,10 +52,7 @@ class Paper:
 
         if budget > 0 and self.full_text:
             body_tokens = enc.encode(self.full_text)
-            if len(body_tokens) > budget:
-                self_body = enc.decode(body_tokens[:budget])
-            else:
-                self_body = self.full_text
+            self_body = enc.decode(body_tokens[:budget]) if len(body_tokens) > budget else self.full_text
             prompt = header + f"Preview of main content:\n {self_body}\n\n"
         else:
             prompt = header
@@ -64,7 +63,12 @@ class Paper:
             messages=[
                 {
                     "role": "system",
-                    "content": f"You are an assistant who perfectly summarizes scientific paper, and gives the core idea of the paper to the user. Your answer should be in {lang}.",
+                    "content": (
+                        f"You are an assistant who perfectly summarizes scientific paper, "
+                        f"and gives the core idea of the paper to the user. "
+                        f"Your answer MUST be entirely written in {lang}. "
+                        f"Respond with exactly one sentence, no preamble."
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -84,9 +88,13 @@ class Paper:
             self.tldr = tldr
             return tldr
 
-    def _generate_affiliations_with_llm(self, openai_client:OpenAI,llm_params:dict) -> Optional[list[str]]:
+    def _generate_affiliations_with_llm(self, openai_client:OpenAI,llm_params:dict) -> list[str] | None:
         if self.full_text is not None:
-            prompt = f"Given the beginning of a paper, extract the affiliations of the authors in a python list format, which is sorted by the author order. If there is no affiliation found, return an empty list '[]':\n\n{self.full_text}"
+            prompt = (
+                f"Given the beginning of a paper, extract the affiliations of the authors "
+                f"in a python list format, which is sorted by the author order. "
+                f"If there is no affiliation found, return an empty list '[]':\n\n{self.full_text}"
+            )
             # use gpt-4o tokenizer for estimation
             enc = tiktoken.encoding_for_model("gpt-4o")
             prompt_tokens = enc.encode(prompt)
@@ -96,7 +104,17 @@ class Paper:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an assistant who perfectly extracts affiliations of authors from a paper. You should return a python list of affiliations sorted by the author order, like [\"TsingHua University\",\"Peking University\"]. If an affiliation is consisted of multi-level affiliations, like 'Department of Computer Science, TsingHua University', you should return the top-level affiliation 'TsingHua University' only. Do not contain duplicated affiliations. If there is no affiliation found, you should return an empty list [ ]. You should only return the final list of affiliations, and do not return any intermediate results.",
+                        "content": (
+                            "You are an assistant who perfectly extracts affiliations of authors "
+                            "from a paper. You should return a python list of affiliations sorted "
+                            "by the author order, like [\"TsingHua University\",\"Peking University\"]. "
+                            "If an affiliation is consisted of multi-level affiliations, like "
+                            "'Department of Computer Science, TsingHua University', you should "
+                            "return the top-level affiliation 'TsingHua University' only. "
+                            "Do not contain duplicated affiliations. If there is no affiliation "
+                            "found, you should return an empty list [ ]. You should only return "
+                            "the final list of affiliations, and do not return any intermediate results."
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -111,7 +129,7 @@ class Paper:
 
             return affiliations
     
-    def generate_affiliations(self, openai_client:OpenAI,llm_params:dict) -> Optional[list[str]]:
+    def generate_affiliations(self, openai_client:OpenAI,llm_params:dict) -> list[str] | None:
         try:
             affiliations = self._generate_affiliations_with_llm(openai_client,llm_params)
             self.affiliations = affiliations

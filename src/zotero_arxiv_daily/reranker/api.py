@@ -1,6 +1,9 @@
-from .base import BaseReranker, register_reranker
-from openai import OpenAI
 import numpy as np
+from openai import OpenAI
+
+from .base import BaseReranker, register_reranker
+
+
 @register_reranker("api")
 class ApiReranker(BaseReranker):
     def get_similarity_score(self, s1: list[str], s2: list[str]) -> np.ndarray:

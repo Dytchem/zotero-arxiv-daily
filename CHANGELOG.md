@@ -40,6 +40,10 @@ All notable changes to this project are documented here.
 - `Relevance` badge showed `n/a` for every card (the render layer hard-coded
   `None`); the real embedding score is now shown.
 - Cards no longer show both a Why note and a TLDR when both are present.
+- Zotero corpus no longer drops papers whose `abstractNote` is empty (common
+  for PDF imports) — the title is used as the embedding/profile fallback, so
+  the research profile reflects the whole library instead of a handful of
+  hand-annotated items.
 
 ## [1.1.0] - 2026-08-02
 

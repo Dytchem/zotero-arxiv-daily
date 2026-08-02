@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented here.
 
+## [1.2.0] - 2026-08-02
+
+### Added
+- **Single HarnessAgent architecture** (replaces the rigid two-stage pipeline):
+  one autonomous agent loop (OpenAI-style function calling) reads the Zotero
+  research profile, inspects the day's embedding-ranked candidates with its own
+  tools (`inspect_candidates` / `inspect_paper`), decides what to recommend and
+  why, and writes the complete digest — subject, intro, per-paper reasons,
+  outro — via `submit_digest`.
+- One LLM provider only: `llm.api` (e.g. OpenRouter `gpt-5.6-luna`). The legacy
+  per-paper TLDR / affiliations calls and the separate harness provider are gone.
+- Agent tools follow the Anthropic/Braintrust practice: small, high-signal,
+  natural-language outputs instead of raw JSON dumps.
+- Graceful degradation: any LLM failure falls back to the embedding order with
+  a simple digest, so the daily email always goes out.
+- Cached research profile (`.cache/research_profile.json`, keyed by corpus hash).
+- Rendered email archive: `cache_dir/last_email.html` is written every run and
+  uploaded as a `last-email` workflow artifact for review.
+- Email polish (from subagent review): CJK font stack, Outlook-safe buttons
+  (solid background + gradient enhancement), responsive `@media` rules, hidden
+  preheader, date in header, higher-contrast footer, localised UI labels via
+  `llm.language` (相关度 / 推荐理由 / 其他候选 / 退订), picks sorted by
+  relevance desc, unpicked candidates listed compactly at the bottom, no
+  dangling border on the last list item.
+
+### Changed
+- `llm.api` is the single LLM entry point: `key` / `base_url` / `generation_kwargs.model`.
+- `llm.harness` now only carries agent-loop tuning: `enabled`, `top_k`,
+  `full_text_budget`, `max_steps`.
+- Agent's own subject line is used in the delivered email (was hard-coded
+  `Daily arXiv YYYY/MM/DD`).
+
+### Fixed
+- arXiv RSS entries that use full `https://arxiv.org/abs/...` URLs as entry ids
+  now yield a bare paper id, so derived PDF/e-print links no longer 404.
+- `Relevance` badge showed `n/a` for every card (the render layer hard-coded
+  `None`); the real embedding score is now shown.
+- Cards no longer show both a Why note and a TLDR when both are present.
+
 ## [1.1.0] - 2026-08-02
 
 ### Added

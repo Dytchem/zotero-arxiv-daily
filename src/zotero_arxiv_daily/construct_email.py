@@ -212,9 +212,12 @@ def _preheader(digest: Digest, language: str) -> str:
         head = f"今日精选 {n} 篇论文"
     else:
         head = f"{n} paper{'s' if n != 1 else ''} recommended today"
-    titles = [dp.reason[:40] for dp in digest.papers[:2] if dp.reason]
-    tail = (" · " + " / ".join(titles)) if titles else ""
-    return (head + tail)[:150]
+    # Use the intro's first sentence (or the subject) as the teaser — never
+    # stitch together per-paper fragments.
+    intro = (digest.intro or "").strip()
+    first_sentence = re.split(r"[。！？!?]\s*", intro)[0] if intro else ""
+    tail = first_sentence if first_sentence else (digest.subject or "")
+    return _safe((head + " · " + tail)[:150])
 
 
 def _footer_html(language: str) -> str:

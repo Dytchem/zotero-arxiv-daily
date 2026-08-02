@@ -39,7 +39,8 @@
 | 特性 | 说明 |
 |------|------|
 | 🧠 **单一 HarnessAgent** | 一个智能体循环完成全部工作：提炼研究画像 → 用工具审阅候选 → 撰写完整邮件 |
-| 🔧 **真正的工具调用循环** | OpenAI function calling：`inspect_candidates` → `inspect_paper` → `submit_digest`，不是机械地逐篇打分 |
+| 🔧 **真正的工具调用循环** | OpenAI function calling：`inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest`，带硬性提交门禁（至少深挖 3 篇） |
+| ⚖️ **生成 + 评审双智能体** | 独立的 fresh-context 评审器给每份草稿打分（分数/问题/通过与否）；`revise` 会把问题反馈给生成器修订，最多 `max_revisions` 轮 |
 | 📝 **结构化输出** | 智能体提交类型化的 `Digest`（主题 / 开场 / 论文 / 结尾）；渲染层只信任结构，绝不信任 LLM 原文 |
 | 🛡️ **安全渲染** | 所有文本字段 HTML 转义，LaTeX 公式转 Unicode（`$\alpha$` → `α`），链接只放行 http(s) |
 | 📧 **邮件客户端适配** | 中文字体栈、Outlook 安全的纯色按钮、响应式布局、隐藏 preheader、按相关度降序 |
@@ -155,9 +156,18 @@ python -m zotero_arxiv_daily.executor --debug
          │            │     HarnessAgent      │◄─────────────┘
          │            │  inspect_candidates   │   候选列表
          │            │  inspect_paper        │   + 向量分数
+         │            │  search_candidates    │
+         │            │  compare_papers       │
          │            │  submit_digest        │
          │            └──────────┬───────────┘
-         │                       │  Digest（结构化 JSON）
+         │                       │  草稿 Digest
+         │                       ▼
+         │            ┌──────────────────────┐
+         │            │   评审器 EVALUATOR    │  fresh context、无工具
+         │            │  分数 + 问题 + 判定    │  approve → 完成
+         │            │  (revise?)           │  revise → 反馈修订循环
+         │            └──────────┬───────────┘
+         │                       │  最终 Digest（结构化 JSON）
          ▼                       ▼
    ┌──────────────────────────────────────┐
    │   construct_email（安全 HTML 渲染）    │
@@ -169,7 +179,7 @@ python -m zotero_arxiv_daily.executor --debug
             └──────────────────┘
 ```
 
-**核心思想**：流水线只负责把廉价信号喂给智能体（向量排序、摘要）；所有*编辑性*决策 —— 推荐什么、每篇理由怎么写、邮件如何组织 —— 都属于智能体。
+**核心思想**：流水线只负责把廉价信号喂给智能体（向量排序、摘要）；所有*编辑性*决策 —— 推荐什么、每篇理由怎么写、邮件如何组织 —— 都属于智能体。另有独立的评审智能体（fresh context、无工具）给每份草稿打分，驱动最多 `max_revisions` 轮改进 —— 这是 Anthropic 报告中对口味型任务质量提升最大的生成器/评审器模式。完整设计见 [`docs/HARNESS.md`](docs/HARNESS.md)。
 
 ---
 

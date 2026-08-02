@@ -39,7 +39,8 @@
 | Feature | Description |
 |---------|-------------|
 | 🧠 **Single HarnessAgent** | One agent loop distills your research profile, inspects candidates with its own tools, and writes the complete digest |
-| 🔧 **Real tool-use loop** | OpenAI function calling: `inspect_candidates` → `inspect_paper` → `submit_digest` — not mechanical per-paper scoring |
+| 🔧 **Real tool-use loop** | OpenAI function calling: `inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest` — with a hard submit gate (≥3 inspections) |
+| ⚖️ **Generator + Evaluator** | An independent fresh-context reviewer grades every draft (score, issues, approve/revise); `revise` feeds the issues back and the generator revises, capped at `max_revisions` |
 | 📝 **Structured output** | The agent submits a typed `Digest` (subject / intro / papers / outro); the render layer trusts only the structure, never raw LLM text |
 | 🛡️ **Safe rendering** | Every text field is HTML-escaped, LaTeX becomes Unicode (`$\alpha$` → `α`), links are whitelisted to http(s) |
 | 📧 **Mail-client hardened** | CJK font stack, Outlook-safe solid-color buttons, responsive layout, hidden preheader, relevance-desc ordering |
@@ -155,9 +156,18 @@ Inspect the rendered email at `.cache/last_email.html` — no sending in debug m
          │            │     HarnessAgent      │◄─────────────┘
          │            │  inspect_candidates   │   candidate list
          │            │  inspect_paper        │   + embedding scores
+         │            │  search_candidates    │
+         │            │  compare_papers       │
          │            │  submit_digest        │
          │            └──────────┬───────────┘
-         │                       │  Digest (typed JSON)
+         │                       │  draft Digest
+         │                       ▼
+         │            ┌──────────────────────┐
+         │            │   EVALUATOR          │  fresh context, no tools
+         │            │  score + issues +    │  approve → done
+         │            │  verdict (revise?)   │  revise → feedback loop
+         │            └──────────┬───────────┘
+         │                       │  final Digest (typed JSON)
          ▼                       ▼
    ┌──────────────────────────────────────┐
    │   construct_email (safe HTML render) │
@@ -169,7 +179,7 @@ Inspect the rendered email at `.cache/last_email.html` — no sending in debug m
             └──────────────────┘
 ```
 
-**Key idea:** the pipeline feeds the agent cheap signals (vector order, abstracts); every *editorial* decision — what to recommend, how to phrase each reason, how to structure the mail — belongs to the agent.
+**Key idea:** the pipeline feeds the agent cheap signals (vector order, abstracts); every *editorial* decision — what to recommend, how to phrase each reason, how to structure the mail — belongs to the agent. A second, independent evaluator agent (fresh context, no tools) grades each draft and drives up to `max_revisions` improvement rounds — the generator/evaluator pattern Anthropic reports as the biggest quality lever for taste-dependent tasks. See [`docs/HARNESS.md`](docs/HARNESS.md) for the full design.
 
 ---
 

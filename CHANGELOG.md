@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [1.3.0] - 2026-08-02
+
+### Added
+- **Generator + Evaluator two-agent architecture** (docs/HARNESS.md): after the
+  generator loop submits a draft, an independent evaluator with fresh context
+  and no tools grades it (score 0-10, issues, verdict approve/revise). A
+  `revise` verdict feeds the issues back and re-runs the generator, capped at
+  `llm.harness.max_revisions` (default 2). The highest-scoring draft wins when
+  the budget exhausts.
+- New generator tools: `search_candidates` (keyword filter over title+abstract)
+  and `compare_papers` (side-by-side of two candidates).
+- Hard submit gate: `llm.harness.min_inspections` (default 3) — the agent
+  cannot submit before deep-diving that many papers with `inspect_paper`;
+  premature submits are rejected and the loop continues.
+- Evaluator degradation: if the evaluator call fails, the draft is kept; if
+  it keeps saying `revise`, budget exhaustion returns the best-scoring draft.
+- Full-width side-by-side PDF/Abstract buttons (100% table, two 50% columns).
+
+### Changed
+- System prompt reworked into an explicit SURVEY → DEEP-DIVE → FOCUS → DECIDE
+  → WRITE → SUBMIT workflow.
+- `llm.harness` gains `min_inspections`, `max_revisions`, `evaluator_enabled`.
+
 ## [1.2.0] - 2026-08-02
 
 ### Added

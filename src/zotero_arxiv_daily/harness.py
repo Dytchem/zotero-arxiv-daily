@@ -519,12 +519,20 @@ class HarnessAgent:
     # -- fallback -------------------------------------------------------
 
     @staticmethod
-    def fallback_digest(candidates: list[Paper], max_papers: int) -> Digest:
+    def fallback_digest(candidates: list[Paper], max_papers: int, language: str = "English") -> Digest:
         """Plain embedding-order digest used when the agent can't run."""
         papers = [
             DigestPaper(index=i, reason=_truncate(p.recommend_reason or "", 200))
             for i, p in enumerate(candidates[:max_papers])
         ]
+        if language.lower().startswith("chinese"):
+            return Digest(
+                subject="每日论文速递",
+                intro="以下是今天与你的研究方向最相关的论文，按相关度排序。",
+                papers=papers,
+                sections=[],
+                outro="祝阅读愉快！",
+            )
         return Digest(
             subject="Daily paper digest",
             intro="Here is today's selection, ordered by relevance to your library.",

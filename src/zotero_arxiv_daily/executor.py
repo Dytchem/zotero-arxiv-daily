@@ -272,7 +272,8 @@ class Executor:
         digest = agent.generate(candidates, corpus)
         if digest is None:
             max_n = int(self.config.executor.get("max_paper_num", 100))
-            digest = HarnessAgent.fallback_digest(candidates, max_n)
+            language = (self.config.llm or {}).get("language", "English")
+            digest = HarnessAgent.fallback_digest(candidates, max_n, language=language)
         return digest
 
     def _populate_full_text(self, paper: Paper) -> None:

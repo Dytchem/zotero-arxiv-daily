@@ -151,26 +151,41 @@ class ArxivRetriever(BaseRetriever):
             raise ValueError("category must be specified for arxiv.")
 
     def _retrieve_raw_papers(self) -> list[dict[str, Any]]:
-        query = '+'.join(self.config.source.arxiv.category)
         include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
         # The RSS atom feed is arXiv's lightweight, rate-limit-free way to get
         # the day's new submissions (official recommendation for this use case).
-        feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
-        if getattr(feed.feed, "title", "") and "Feed error for query" in feed.feed.title:
-            raise Exception(f"Invalid ARXIV_QUERY: {query}.")
+        # Fetch each category as its own feed: a single `+`-joined query is
+        # capped by arXiv and silently truncates when many categories are set.
         allowed_announce_types = {"new", "cross"} if include_cross_list else {"new"}
-        raw_papers = [
-            _rss_entry_to_paper(entry)
-            for entry in feed.entries
-            if entry.get("arxiv_announce_type", "new") in allowed_announce_types
-        ]
+        raw_papers: list[dict[str, Any]] = []
+        total_entries = 0
+        for category in self.config.source.arxiv.category:
+            feed = feedparser.parse(f"https://rss.arxiv.org/atom/{category}")
+            if getattr(feed.feed, "title", "") and "Feed error for query" in feed.feed.title:
+                raise Exception(f"Invalid ARXIV_QUERY: {category}.")
+            total_entries += len(feed.entries)
+            raw_papers.extend(
+                _rss_entry_to_paper(entry)
+                for entry in feed.entries
+                if entry.get("arxiv_announce_type", "new") in allowed_announce_types
+            )
         # The atom feed is capped by arXiv; warn when we are close to the limit
         # so a silently truncated candidate list can be noticed.
-        if len(feed.entries) >= 1000:
+        if total_entries >= 1000:
             logger.warning(
-                f"arXiv RSS returned {len(feed.entries)} entries — the feed may be "
+                f"arXiv RSS returned {total_entries} entries across categories — the feed may be "
                 f"truncated. Consider splitting categories or raising include_cross_list."
             )
+        # A paper cross-listed into several of the configured categories appears
+        # once per feed; dedupe by paper id before returning.
+        seen_ids: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for paper in raw_papers:
+            if paper["paper_id"] in seen_ids:
+                continue
+            seen_ids.add(paper["paper_id"])
+            deduped.append(paper)
+        raw_papers = deduped
         if self.config.executor.debug:
             raw_papers = raw_papers[:10]
         logger.info(f"Parsed {len(raw_papers)} papers from arXiv RSS ({', '.join(self.config.source.arxiv.category)})")

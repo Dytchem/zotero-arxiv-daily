@@ -8,7 +8,6 @@ from zotero_arxiv_daily.retriever.biorxiv_retriever import BiorxivRetriever
 
 
 def test_biorxiv_retrieve(config, mock_biorxiv_api, monkeypatch):
-    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
     with open_dict(config.source):
         config.source.biorxiv = {"category": ["bioinformatics"]}
     retriever = BiorxivRetriever(config)
@@ -31,7 +30,6 @@ def test_biorxiv_empty_response(config, monkeypatch):
         return resp
 
     monkeypatch.setattr(requests, "get", _patched)
-    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
 
     with open_dict(config.source):
         config.source.biorxiv = {"category": ["bioinformatics"]}
@@ -50,6 +48,20 @@ def test_biorxiv_convert_to_paper(config):
     assert paper.source == "biorxiv"
     assert "biorxiv.org" in paper.pdf_url
     assert paper.authors == ["Smith, J.", "Doe, A.", "Lee, K."]
+
+
+def test_biorxiv_convert_to_paper_url_points_to_abs_page(config):
+    """url should be the abstract page; pdf_url the .full.pdf download."""
+    from omegaconf import open_dict
+
+    with open_dict(config.source):
+        config.source.biorxiv = {"category": ["bioinformatics"]}
+    retriever = BiorxivRetriever(config)
+    raw = SAMPLE_BIORXIV_API_RESPONSE["collection"][0]
+    paper = retriever.convert_to_paper(raw)
+    assert paper.url == "https://www.biorxiv.org/content/10.1101/2026.03.01.000001v1"
+    assert paper.pdf_url == paper.url + ".full.pdf"
+    assert paper.url != paper.pdf_url
 
 
 def test_biorxiv_requires_category(config):

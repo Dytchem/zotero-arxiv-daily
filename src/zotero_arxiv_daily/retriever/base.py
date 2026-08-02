@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from time import sleep
 
 from loguru import logger
 from omegaconf import DictConfig
@@ -43,7 +42,6 @@ class BaseRetriever(ABC):
                 continue
             if paper is not None:
                 papers.append(paper)
-            sleep(1)
         return papers
 
 registered_retrievers = {}

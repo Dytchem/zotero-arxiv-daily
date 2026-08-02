@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 - Email rendering upgrade: paper titles link to the abstract page, source badge (arXiv/bioRxiv/medRxiv) per card, and a header summary ("N papers recommended for you").
 - `email.receivers`: extra recipients in addition to `receiver` (Cc), as a YAML list or comma-separated string.
 - Top-level exception handling in `main.py`: fatal errors are logged with a full traceback and a non-zero exit code (so the workflow failure notification fires reliably).
+- arXiv retrieval now fetches each configured category as its own RSS feed and dedupes across categories, avoiding the arXiv 1000-entry truncation cap when many categories are set.
+- bioRxiv/medRxiv papers now link to the abstract page (`url`), with the PDF download as `pdf_url` (previously both pointed at the PDF).
+- Removed the pointless 1-second sleep per paper during conversion (~100s saved per 100 papers).
+- Chinese intro section in README.
 
 ### Changed
 - No-email decision now also triggers when every candidate was filtered out by `min_score` (previously only when zero papers were retrieved).

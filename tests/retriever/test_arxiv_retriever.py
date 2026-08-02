@@ -24,7 +24,6 @@ def _raise_runtime_error() -> None:
 
 def test_arxiv_retriever_rss_driven(config, mock_feedparser, monkeypatch):
     """Papers are built straight from the RSS feed; no arxiv API involved."""
-    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
     monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
     monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
     monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
@@ -53,6 +52,74 @@ def test_arxiv_retriever_rss_driven(config, mock_feedparser, monkeypatch):
 def test_parse_abstract_strips_rss_prefix():
     summary = "arXiv:2508.13426v1 Announce Type: new \nAbstract: A novel method for X."
     assert _parse_abstract(summary) == "A novel method for X."
+
+
+def test_arxiv_retriever_fetches_each_category_feed(config, mock_feedparser, monkeypatch):
+    """Each configured category is fetched as its own feed (avoids 1000-entry cap)."""
+    import feedparser
+    from omegaconf import open_dict
+
+    fetched_urls: list[str] = []
+    raw_parse = feedparser.parse
+
+    def _recording_parse(url_or_bytes, *args, **kwargs):
+        target = url_or_bytes.decode("utf-8", errors="ignore") if isinstance(url_or_bytes, bytes) else url_or_bytes
+        if isinstance(target, str) and "rss.arxiv.org" in target:
+            fetched_urls.append(target)
+        return raw_parse(url_or_bytes, *args, **kwargs)
+
+    monkeypatch.setattr(feedparser, "parse", _recording_parse)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
+
+    with open_dict(config.source):
+        config.source.arxiv = {"category": ["cs.AI", "cs.CV", "cs.LG"]}
+    retriever = ArxivRetriever(config)
+    retriever.retrieve_papers()
+
+    assert fetched_urls == [
+        "https://rss.arxiv.org/atom/cs.AI",
+        "https://rss.arxiv.org/atom/cs.CV",
+        "https://rss.arxiv.org/atom/cs.LG",
+    ]
+
+
+def test_arxiv_retriever_dedupes_cross_category(config, mock_feedparser, monkeypatch):
+    """A paper appearing in two category feeds is returned only once."""
+    import feedparser
+    from omegaconf import open_dict
+
+    new_entries = [
+        e for e in mock_feedparser.entries
+        if e.get("arxiv_announce_type", "new") == "new"
+    ]
+    # Build two different feeds that share one paper (cross-listed)
+    shared = new_entries[0]
+    other = new_entries[1] if len(new_entries) > 1 else new_entries[0]
+    feed_a = SimpleNamespace(entries=[shared, other], feed=SimpleNamespace(title="feed a"))
+    feed_b = SimpleNamespace(entries=[shared], feed=SimpleNamespace(title="feed b"))
+    by_url = {
+        "https://rss.arxiv.org/atom/cs.AI": feed_a,
+        "https://rss.arxiv.org/atom/cs.CV": feed_b,
+    }
+
+    def _multi_parse(url_or_bytes, *args, **kwargs):
+        target = url_or_bytes.decode("utf-8", errors="ignore") if isinstance(url_or_bytes, bytes) else url_or_bytes
+        return by_url.get(target, SimpleNamespace(entries=[], feed=SimpleNamespace(title="")))
+
+    monkeypatch.setattr(feedparser, "parse", _multi_parse)
+
+    with open_dict(config.source):
+        config.source.arxiv = {"category": ["cs.AI", "cs.CV"]}
+    retriever = ArxivRetriever(config)
+    raw = retriever._retrieve_raw_papers()
+
+    # shared paper appears in both feeds but is deduped to one entry
+    ids = [p["paper_id"] for p in raw]
+    assert len(ids) == len(set(ids))
+    assert _rss_entry_to_paper(shared)["paper_id"] in ids
+    assert len(raw) == 2
 
 
 def test_parse_abstract_without_prefix():

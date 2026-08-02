@@ -25,6 +25,19 @@
 > [!IMPORTANT]
 > Please keep an eye on this repo, and merge your forked repo in time when there is any update of this upstream, in order to enjoy new features and fix found bugs.
 
+## 🇨🇳 中文简介
+
+**Zotero-arXiv-Daily** 每天根据你的 Zotero 文献库，从 arXiv / bioRxiv / medRxiv 自动检索
+与你研究兴趣相关的新论文，生成 TL;DR 摘要，并发送到你的邮箱📮。
+
+- 支持本地嵌入模型或 API 重排序（混合 BM25 + 向量相似度）
+- 论文按与你近期研究兴趣的相关度排序，可配置 `min_score` 过滤低相关论文
+- 同一预印本在 arXiv 与 bioRxiv 双发时自动去重，只推一次
+- 支持多收件人（`email.receivers`）
+- 零成本部署：Fork 仓库 + 配置 GitHub Action Secrets 即可每日自动运行
+
+完整使用方式见下文英文文档。
+
 ## 🧐 About <a name = "about"></a>
 
 > Track new scientific researches of your interest by just forking (and staring) this repo!😊

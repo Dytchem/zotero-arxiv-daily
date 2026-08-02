@@ -18,7 +18,7 @@ from __future__ import annotations
 import html
 import re
 
-from .harness import Digest
+from .harness import Digest, _today_str
 from .protocol import Paper
 
 framework = """
@@ -27,22 +27,31 @@ framework = """
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  @media (max-width:480px){
+    .card{padding:14px 14px !important;}
+    .body-pad{padding:16px 12px !important;}
+    .btn{display:block !important;margin:6px 0 0 0 !important;text-align:center;}
+    .hdr{padding:16px 16px !important;}
+  }
+</style>
 </head>
-<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#f4f5f7;line-height:1px;">__PREHEADER__</div>
 <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
   <div style="background:#ffffff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
-    <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);padding:22px 28px;">
+    <div class="hdr" style="background-color:#2563eb;background-image:linear-gradient(135deg,#2563eb,#7c3aed);padding:22px 28px;">
       <div style="color:#ffffff;font-size:22px;font-weight:700;">__TITLE__</div>
-      <div style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:4px;">__SUMMARY__</div>
+      <div style="color:rgba(255,255,255,0.9);font-size:13px;margin-top:4px;">__SUMMARY__</div>
     </div>
-    <div style="padding:24px 28px;">
+    <div class="body-pad" style="padding:24px 28px;">
       __INTRO__
       __CONTENT__
       __OUTRO__
     </div>
   </div>
-  <div style="text-align:center;color:#9ca3af;font-size:12px;padding:16px 0 8px;">
-    To unsubscribe, remove your email in your Github Action setting.
+  <div style="text-align:center;color:#6b7280;font-size:12px;padding:16px 8px 8px;">
+    __FOOTER__
   </div>
 </div>
 </body>
@@ -119,9 +128,10 @@ def get_empty_html() -> str:
     """
 
 
-def _rate_html(score: float | None) -> str:
+def _rate_html(score: float | None, language: str = "English") -> str:
+    label = "相关度" if language.lower().startswith("chinese") else "Relevance"
     if score is None:
-        return '<span style="display:inline-block;background:#eef2ff;color:#4f46e5;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">Relevance: n/a</span>'
+        return f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">{label}: n/a</span>'
     try:
         rate = round(float(score), 1)
     except (TypeError, ValueError):
@@ -129,11 +139,11 @@ def _rate_html(score: float | None) -> str:
     return (
         f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;'
         f'font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">'
-        f'Relevance: {rate}</span>'
+        f'{label}: {rate}</span>'
     )
 
 
-def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None) -> str:
+def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None, language: str = "English") -> str:
     title_text = _mathify(title)
     title_html = title_text
     clean_url = _clean_link(url)
@@ -151,53 +161,76 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
 
     # One note per card: prefer the agent's Why (recommendation reason);
     # fall back to the TLDR when no reason is given. Never show both.
+    why_label = "推荐理由" if language.lower().startswith("chinese") else "Why"
+    tldr_label = "一句话" if language.lower().startswith("chinese") else "TLDR"
     note_html = ""
     if reason:
         note_html = (
             f'<div style="margin-top:10px;font-size:13px;color:#6d28d9;'
             f'background:#faf5ff;border-left:4px solid #a855f7;padding:8px 12px;'
-            f'border-radius:6px;"><strong>Why:</strong> {_safe(reason)}</div>'
+            f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(reason)}</div>'
         )
     elif tldr:
         note_html = (
             f'<div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;'
             f'background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">'
-            f'<strong>TLDR:</strong> {_safe(tldr)}</div>'
+            f'<strong>{tldr_label}:</strong> {_safe(tldr)}</div>'
         )
 
     buttons = ""
     clean_pdf = _clean_link(pdf_url)
     if clean_pdf:
         buttons += (
-            f'<a href="{clean_pdf}" style="display:inline-block;text-decoration:none;font-size:13px;'
-            f'font-weight:700;color:#ffffff;background:linear-gradient(135deg,#2563eb,#4f46e5);'
+            f'<a href="{clean_pdf}" class="btn" style="display:inline-block;text-decoration:none;font-size:13px;'
+            f'font-weight:700;color:#ffffff;background-color:#2563eb;background-image:linear-gradient(135deg,#2563eb,#4f46e5);'
             f'padding:9px 18px;border-radius:8px;">PDF</a>'
         )
     if clean_url:
         margin = "margin-left:8px;" if buttons else ""
         buttons += (
-            f'<a href="{clean_url}" style="display:inline-block;text-decoration:none;font-size:13px;'
+            f'<a href="{clean_url}" class="btn" style="display:inline-block;text-decoration:none;font-size:13px;'
             f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 18px;'
             f'border-radius:8px;{margin}">Abstract</a>'
         )
 
     return f"""
-    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
+    <div class="card" style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
       {badge_html}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
       <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>
-      <div style="margin-top:10px;">{_rate_html(score)}</div>
+      <div style="margin-top:10px;">{_rate_html(score, language)}</div>
       {note_html}
       <div style="margin-top:14px;">{buttons}</div>
     </div>
     """
 
 
+def _preheader(digest: Digest, language: str) -> str:
+    """Inbox-preview text: a short, skimmable teaser of the digest."""
+    n = len(digest.papers)
+    if language.lower().startswith("chinese"):
+        head = f"今日精选 {n} 篇论文"
+    else:
+        head = f"{n} paper{'s' if n != 1 else ''} recommended today"
+    titles = [dp.reason[:40] for dp in digest.papers[:2] if dp.reason]
+    tail = (" · " + " / ".join(titles)) if titles else ""
+    return (head + tail)[:150]
+
+
+def _footer_html(language: str) -> str:
+    if language.lower().startswith("chinese"):
+        return (
+            "不再接收？在 GitHub Actions 设置的 Secrets 中移除你的邮箱即可退订。"
+            "<br>本邮件由 Zotero-arXiv-Daily 自动生成。"
+        )
+    return "To unsubscribe, remove your email in your GitHub Actions settings."
+
+
 def _others_block_html(papers: list[Paper], language: str = "English") -> str:
     """Compact list of candidates the agent did not pick (bottom of the email)."""
     heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
     rows = ""
-    for p in papers:
+    for i, p in enumerate(papers):
         title_text = _safe(_mathify(p.title))
         clean_url = _clean_link(p.url)
         link = f'<a href="{clean_url}" style="color:#111827;text-decoration:none;">{title_text}</a>' if clean_url else title_text
@@ -205,8 +238,9 @@ def _others_block_html(papers: list[Paper], language: str = "English") -> str:
         if p.source:
             label = _SOURCE_LABELS.get(p.source, p.source)
             badge = f'<span style="background:#eef2ff;color:#4f46e5;font-size:10px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:8px;">{_safe(label)}</span>'
+        border = "border-bottom:1px solid #f3f4f6;" if i < len(papers) - 1 else ""
         rows += (
-            f'<div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;line-height:1.4;">'
+            f'<div style="padding:8px 0;{border}font-size:13px;line-height:1.4;">'
             f'{link}{badge}</div>'
         )
     return (
@@ -226,10 +260,11 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         return render_fallback(originals or [])
 
     title = _safe(_mathify(digest.subject)) or "Daily paper digest"
+    today = _today_str()
     if language.lower().startswith("chinese"):
-        summary = f"精选 {len(digest.papers)} 篇论文"
+        summary = f"{today} · 精选 {len(digest.papers)} 篇论文"
     else:
-        summary = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+        summary = f"{today} · {len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
     intro = _safe(_mathify(digest.intro))
     outro = _safe(_mathify(digest.outro))
 
@@ -238,7 +273,14 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     if digest.papers:
         # Map candidate index -> original Paper so we can pull authors/url/pdf/source.
         originals_by_index = dict(enumerate(originals or []))
-        for dp in digest.papers:
+        # Render picks in descending relevance order (agent order is editorial,
+        # but readers expect the strongest match first).
+        ordered = sorted(
+            digest.papers,
+            key=lambda dp: ((originals_by_index.get(dp.index).score if originals_by_index.get(dp.index) else None) or 0.0),
+            reverse=True,
+        )
+        for dp in ordered:
             paper = originals_by_index.get(dp.index)
             title_text = paper.title if paper else f"Paper {dp.index}"
             authors = ", ".join((paper.authors or [])[:5]) if paper else ""
@@ -252,6 +294,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 pdf_url=(paper.pdf_url if paper else None),
                 source=(paper.source if paper else None),
                 score=(paper.score if paper else None),
+                language=language,
             )
             selected_indices.add(dp.index)
     else:
@@ -268,8 +311,10 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     content = cards + others_html
     html = framework.replace("__TITLE__", title)
     html = html.replace("__SUMMARY__", summary)
+    html = html.replace("__PREHEADER__", _preheader(digest, language))
     html = html.replace("__INTRO__", f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "")
     html = html.replace("__OUTRO__", f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "")
+    html = html.replace("__FOOTER__", _footer_html(language))
     return html.replace("__CONTENT__", content)
 
 
@@ -278,7 +323,8 @@ def render_fallback(papers: list[Paper], language: str = "English") -> str:
     if not papers:
         return framework.replace("__TITLE__", "Daily paper digest").replace(
             "__SUMMARY__", "No new papers today"
-        ).replace("__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", get_empty_html())
+        ).replace("__PREHEADER__", "").replace("__FOOTER__", _footer_html(language)).replace(
+            "__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", get_empty_html())
 
     body = ""
     for _i, p in enumerate(papers):
@@ -291,6 +337,7 @@ def render_fallback(papers: list[Paper], language: str = "English") -> str:
             pdf_url=p.pdf_url,
             source=p.source,
             score=p.score,
+            language=language,
         )
     if language.lower().startswith("chinese"):
         summary = f"共 {len(papers)} 篇论文"
@@ -298,4 +345,5 @@ def render_fallback(papers: list[Paper], language: str = "English") -> str:
         summary = f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"
     return framework.replace("__TITLE__", "Daily paper digest").replace(
         "__SUMMARY__", summary
-    ).replace("__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", body)
+    ).replace("__PREHEADER__", "").replace("__FOOTER__", _footer_html(language)).replace(
+        "__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", body)

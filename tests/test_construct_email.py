@@ -97,6 +97,36 @@ def test_render_fallback_chinese_summary():
     assert "共 1 篇论文" in html
 
 
+def test_render_email_preheader_and_footer_localised():
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "今日精选 1 篇论文" in html
+    assert "GitHub Actions" in html
+
+
+def test_render_email_picks_sorted_by_score_desc():
+    """Recommended cards render highest relevance first."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[
+            DigestPaper(index=0, reason="low"),
+            DigestPaper(index=1, reason="high"),
+        ],
+        outro="",
+    )
+    originals = [_paper(0, title="Low Score Paper", score=4.0), _paper(1, title="High Score Paper", score=9.0)]
+    html = render_email(digest, originals=originals)
+    assert html.index("High Score Paper") < html.index("Low Score Paper")
+
+
+def test_render_email_others_last_item_no_border():
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    originals = [_paper(0), _paper(1), _paper(2)]
+    html = render_email(digest, originals=originals)
+    # only 1 border-bottom in the others list (between the two unpicked items)
+    assert html.count("border-bottom:1px solid #f3f4f6;") == 1
+
+
 def test_render_email_empty_digest():
     digest = Digest(subject="x", intro="", papers=[], outro="")
     html = render_email(digest, originals=[])

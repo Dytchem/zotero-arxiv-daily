@@ -85,6 +85,20 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _today_str() -> str:
+    """Today's date in the user's timezone (Asia/Shanghai), e.g. '2026-08-02 (Sunday)'."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("Asia/Shanghai"))
+        return now.strftime("%Y-%m-%d (%A)")
+    except Exception:
+        from datetime import datetime
+
+        return datetime.now().strftime("%Y-%m-%d")
+
+
 def _extract_json(content: str) -> object:
     """Parse JSON from an LLM reply, tolerating markdown fences / prose."""
     text = (content or "").strip()
@@ -353,19 +367,31 @@ class HarnessAgent:
             "scientist's research profile, inspect the day's candidate papers, and "
             "produce a high-quality daily digest email.\n\n"
             f"Research profile:\n{profile_text}\n\n"
+            f"Today: {_today_str()}. The candidates are the newest papers from the "
+            "user's subscribed feeds (on weekends/holidays arXiv publishes nothing, "
+            "so the feed may roll back a few days — say so in the intro if so).\n\n"
             "Tasks:\n"
             "1. Use inspect_candidates to survey the day's papers (embedding score 0-10 "
             "is a hint, not a command — use your judgement).\n"
             "2. Use inspect_paper on any paper you are unsure about.\n"
-            "3. Decide which papers to recommend. Prefer a small set of genuinely "
-            "relevant papers over a huge dump. A good reason must connect the paper to "
-            "the user's actual interests.\n"
-            "4. Write the digest in " + self.language + ".\n"
+            "3. Decide which papers to recommend. Prefer a focused set of genuinely "
+            "relevant papers (typically 3-6) over a huge dump: quality over quantity. "
+            "Every pick must earn its place; unpicked candidates will still be listed "
+            "separately at the bottom of the email, so you are free to be selective. "
+            "A good reason must connect the paper to the user's actual interests — "
+            "say what the paper contributes and why it matters to this specific "
+            "researcher, not a generic abstract paraphrase. Keep each reason compact "
+            "(2-4 sentences); skip filler.\n"
+            "4. Write the digest in " + self.language + ". The subject should be "
+            "short, informative, and in the same language; the intro should give "
+            "context (what today's batch looks like overall); the outro should sign "
+            "off warmly and look ahead.\n"
             "5. Call submit_digest with the finished subject, intro, per-paper "
             "recommendation reasons, and outro.\n\n"
-            "Quality bar: reasons should be specific and insightful, not generic. The "
-            "subject should be short and informative. The intro should give context; "
-            "the outro should sign off warmly."
+            "Quality bar: reasons should be specific and insightful, not generic. "
+            "Never invent content that is not in the paper's abstract or full text. "
+            "If nothing is worth recommending, submit an empty papers list with an "
+            "honest intro."
         )
 
         messages = [{"role": "system", "content": system_prompt}]

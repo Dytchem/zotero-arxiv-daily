@@ -8,6 +8,7 @@ from zotero_arxiv_daily.retriever.arxiv_retriever import (
     ArxivRetriever,
     _parse_abstract,
     _parse_authors,
+    _extract_arxiv_id,
     _rss_entry_to_paper,
     _run_with_hard_timeout,
 )
@@ -143,6 +144,19 @@ def test_rss_entry_to_paper_derives_urls(mock_feedparser):
     assert paper["url"] == entry.link
     assert paper["pdf_url"] == f"https://arxiv.org/pdf/{pid}"
     assert paper["source_url"] == f"https://arxiv.org/e-print/{pid}"
+
+
+def test_extract_arxiv_id_formats():
+    # canonical OAI prefix
+    assert _extract_arxiv_id("oai:arXiv.org:2607.26142") == "2607.26142"
+    # full abs / pdf URLs (previously produced broken /pdf/<url> links)
+    assert _extract_arxiv_id("https://arxiv.org/abs/2607.26142v1") == "2607.26142v1"
+    assert _extract_arxiv_id("https://arxiv.org/pdf/2607.26142v2") == "2607.26142v2"
+    # old-style ids stay intact
+    assert _extract_arxiv_id("oai:arXiv.org:cs/0501001") == "cs/0501001"
+    # empty / junk
+    assert _extract_arxiv_id("") == ""
+    assert _extract_arxiv_id(None) == ""
 
 
 def test_run_with_hard_timeout_returns_value():

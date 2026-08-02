@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import re
 from collections.abc import Callable
 from datetime import UTC
 from queue import Empty
@@ -132,7 +133,7 @@ def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
     so we never need to hit the arXiv query API (which is rate-limited) just
     to list the day's new papers. PDF/source URLs are derived from the ID.
     """
-    paper_id = entry.id.removeprefix("oai:arXiv.org:")
+    paper_id = _extract_arxiv_id(entry.id)
     return {
         "paper_id": paper_id,
         "title": entry.title,
@@ -142,6 +143,23 @@ def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
         "pdf_url": f"https://arxiv.org/pdf/{paper_id}",
         "source_url": f"https://arxiv.org/e-print/{paper_id}",
     }
+
+
+def _extract_arxiv_id(raw: str) -> str:
+    """Extract a bare arXiv ID from any entry-id format we may see.
+
+    arXiv feeds historically use ``oai:arXiv.org:2607.26142``, but some
+    endpoints emit full URLs (``https://arxiv.org/abs/2607.26142v1`` or
+    ``.../pdf/2607.26142v1``). Treating the whole URL as the paper id used
+    to produce broken ``/pdf/<url>`` and ``/e-print/<url>`` links (404s).
+    """
+    raw = (raw or "").strip()
+    raw = raw.removeprefix("oai:arXiv.org:").removeprefix("oai:arxiv.org:")
+    # full abs/pdf URL -> bare id
+    match = re.search(r"arxiv\.org/(?:abs|pdf)/([^/\s?]+)", raw)
+    if match:
+        raw = match.group(1)
+    return raw
 
 
 @register_retriever("arxiv")

@@ -576,3 +576,34 @@ def test_write_run_report_does_not_raise_on_bad_config(tmp_path):
     executor = Executor.__new__(Executor)
     executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path)}})
     executor._write_run_report(corpus=1, candidates=2, ranked=3, elapsed=0.1)  # no raise
+
+
+# ---------------------------------------------------------------------------
+# digest subject
+# ---------------------------------------------------------------------------
+
+
+def test_digest_subject_single_arxiv():
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"source": ["arxiv"]}})
+    subject = executor._digest_subject()
+    assert subject.startswith("Daily arXiv ")
+
+
+def test_digest_subject_multi_source():
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"source": ["arxiv", "biorxiv"]}})
+    subject = executor._digest_subject()
+    assert subject.startswith("Daily Digest (arxiv, biorxiv) ")
+
+
+def test_digest_subject_empty_sources():
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"source": []}})
+    assert executor._digest_subject().startswith("Daily arXiv ")

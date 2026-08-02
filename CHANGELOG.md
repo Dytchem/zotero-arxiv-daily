@@ -20,6 +20,8 @@ All notable changes to this project are documented here.
 - Notifier plugin system (`src/zotero_arxiv_daily/notifier.py`): the digest can fan out to several channels in one run. Built-ins: `email` (SMTP, original behavior extracted to `email_sender.py`) and `webhook` (generic JSON POST for Telegram / Server酱 / 钉钉 / Discord / Slack — set `executor.notifiers: ['email', 'webhook']` and `webhook.url`).
 - Structured run report: every run writes `cache_dir/last_run.json` (timestamp, corpus/candidates/ranked counts, elapsed, source, reranker) for machine-readable monitoring.
 - CI now enforces a coverage floor (`--cov-fail-under=80`).
+- Email/digest subject is now source-aware (`Daily arXiv 2026/08/02` vs `Daily Digest (arxiv, biorxiv) 2026/08/02`).
+- Workflow cache key fixed to `corpus-embeddings` so GitHub Actions overwrites one cache entry instead of accumulating one per run.
 
 ### Changed
 - No-email decision now also triggers when every candidate was filtered out by `min_score` (previously only when zero papers were retrieved).

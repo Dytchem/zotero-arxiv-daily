@@ -274,10 +274,19 @@ class Executor:
         from .notifier import get_notifier_cls
 
         names = self.config.executor.get("notifiers") or ["email"]
+        subject = self._digest_subject()
         for name in names:
             notifier = get_notifier_cls(name)(self.config)
             logger.info(f"Delivering via notifier={name}...")
-            notifier.send(html)
+            notifier.send(html, subject=subject)
+
+    def _digest_subject(self) -> str:
+        """e.g. 'Daily arXiv 2026/08/02' or 'Daily Digest (arxiv, biorxiv) 2026/08/02'."""
+        import datetime as _dt
+
+        sources = list(self.config.executor.source)
+        label = "arXiv" if sources == ["arxiv"] or len(sources) == 0 else "Digest (" + ", ".join(sources) + ")"
+        return f"Daily {label} {_dt.datetime.now().strftime('%Y/%m/%d')}"
 
     def _write_run_report(self, *, corpus: int, candidates: int, ranked: int, elapsed: float) -> None:
         """Persist a machine-readable summary of this run to cache_dir/last_run.json."""

@@ -55,6 +55,11 @@ executor:
   dedupe_history: true # Skip papers already emailed in previous runs (persisted in .cache/sent_papers.json). Disabled automatically in debug mode. Example: true
   cache_dir: .cache # Directory for run-state files (sent-paper history, embeddings cache). Example: .cache
   notifiers: ['email'] # Delivery channels for the digest: 'email', 'webhook' (or both). Example: ['email', 'webhook']
+  # When notifiers includes 'webhook', configure it here (example for Telegram):
+  # webhook:
+  #   url: https://api.telegram.org/bot<TOKEN>/sendMessage
+  #   format: text   # 'html' (default) or 'text'
+  #   payload_field: content   # JSON field carrying the digest text
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
   rerank_alpha: 0.7 # Hybrid rerank weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only. Example: 0.7

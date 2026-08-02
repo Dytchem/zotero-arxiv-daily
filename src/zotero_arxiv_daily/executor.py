@@ -110,7 +110,10 @@ class Executor:
         collections = zot.everything(zot.collections())
         collections = {c['key']: c for c in collections}
         corpus = zot.everything(zot.items(itemType='conferencePaper || journalArticle || preprint'))
-        corpus = [c for c in corpus if c['data']['abstractNote'] != '']
+        # Keep every entry: many papers imported from PDFs have an empty
+        # abstractNote, and dropping them shrinks the research profile to a
+        # handful of papers. Fall back to the title where abstract is empty.
+        corpus = [c for c in corpus if c['data']['title'] != '']
 
         def get_collection_path(col_key: str) -> str:
             if p := collections[col_key]['data']['parentCollection']:
@@ -123,7 +126,7 @@ class Executor:
         logger.info(f"Fetched {len(corpus)} zotero papers")
         return [CorpusPaper(
             title=c['data']['title'],
-            abstract=c['data']['abstractNote'],
+            abstract=c['data']['abstractNote'] or c['data']['title'],
             added_date=_dt.datetime.strptime(c['data']['dateAdded'], '%Y-%m-%dT%H:%M:%SZ'),
             paths=c['paths'],
         ) for c in corpus]

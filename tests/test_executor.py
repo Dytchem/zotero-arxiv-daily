@@ -143,6 +143,43 @@ def test_fetch_zotero_corpus_paper_with_zero_collections(config, monkeypatch):
     assert corpus[0].paths == []
 
 
+def test_fetch_zotero_corpus_keeps_empty_abstract_with_title_fallback(config, monkeypatch):
+    """Papers imported from PDFs often have an empty abstractNote; they must
+    stay in the corpus (title used as the embedding/profile fallback) instead
+    of shrinking the research profile to almost nothing."""
+    from tests.canned_responses import make_stub_zotero_client
+
+    items = [
+        {
+            "data": {
+                "title": "PDF Import Paper",
+                "abstractNote": "",
+                "dateAdded": "2026-03-01T00:00:00Z",
+                "collections": ["COL1"],
+            }
+        },
+        {
+            "data": {
+                "title": "Regular Paper",
+                "abstractNote": "A real abstract.",
+                "dateAdded": "2026-03-02T00:00:00Z",
+                "collections": [],
+            }
+        },
+    ]
+    stub_zot = make_stub_zotero_client(items=items)
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    executor = Executor.__new__(Executor)
+    executor.config = config
+    corpus = executor.fetch_zotero_corpus()
+
+    assert len(corpus) == 2
+    # Empty abstract falls back to the title so embeddings/profile still work.
+    assert corpus[0].abstract == "PDF Import Paper"
+    assert corpus[1].abstract == "A real abstract."
+
+
 # ---------------------------------------------------------------------------
 # E2E: Executor.run()
 # ---------------------------------------------------------------------------

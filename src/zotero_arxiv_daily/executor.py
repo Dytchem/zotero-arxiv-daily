@@ -429,9 +429,13 @@ class Executor:
         subject = (digest.subject if digest and digest.subject else None) or self._digest_subject()
         self._deliver(html_content, subject=subject)
 
-        if selected_papers and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
+        if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
+            # Record every candidate that made it into the email (picked ones
+            # AND the "other candidates" list) so that nothing already shown
+            # to the reader is re-shown on a later day. New papers keep
+            # flowing in from the feeds; yesterday's are never repeated.
             sent = self._load_sent_history()
-            sent.update(p.url for p in selected_papers)
+            sent.update(p.url for p in ranked)
             self._save_sent_history(sent)
 
         logger.info(

@@ -246,6 +246,20 @@ def test_mathify():
     assert _mathify("$\\frac{1}{2}$") == "/12"
 
 
+def test_strip_markdown():
+    from zotero_arxiv_daily.construct_email import _strip_markdown
+
+    # LLM 泄漏的 markdown 语法 → 干净文本
+    assert _strip_markdown("**Contextual relevance — [Quantum model reduction](https://arxiv.org/abs/1)** develops X") == (
+        "Contextual relevance — Quantum model reduction develops X"
+    )
+    assert _strip_markdown("`code` and **bold** and _italic_") == "code and bold and italic"
+    assert _strip_markdown("plain text") == "plain text"
+    # 行首的 markdown 标题头去掉; 文本中间的 # 保留 (如 C#)
+    assert _strip_markdown("# Heading") == "Heading"
+    assert "#" in _strip_markdown("C# is great")
+
+
 def test_get_empty_html():
     assert "No Papers Today" in get_empty_html()
 

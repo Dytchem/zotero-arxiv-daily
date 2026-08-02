@@ -80,6 +80,28 @@ def _safe(text: str | None) -> str:
     return html.escape(text or "", quote=True)
 
 
+def _strip_markdown(text: str) -> str:
+    """Remove stray Markdown that an LLM may have left in prose fields.
+
+    The agent is told to write plain text, but occasionally it still emits
+    ``**bold**`` or ``[title](url)`` inline. Rather than trusting the model,
+    the render layer strips these to clean text: links keep their label,
+    emphasis markers disappear. Applied before HTML-escaping.
+    """
+    if not text:
+        return text
+    # [label](url) -> label (never keep the raw URL in prose)
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    # **bold** / __bold__ -> bold
+    text = re.sub(r"\*{1,2}([^*]+?)\*{1,2}", r"\1", text)
+    text = re.sub(r"_{1,2}([^_]+?)_{1,2}", r"\1", text)
+    # backticks / hash headers / arrows leftover from markdown
+    text = re.sub(r"`([^`]+?)`", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = text.replace("**", "").replace("__", "")
+    return text
+
+
 def _mathify(text: str) -> str:
     """Convert common inline LaTeX to readable unicode, keeping the rest plain.
 
@@ -144,7 +166,7 @@ def _rate_html(score: float | None, language: str = "English") -> str:
 
 
 def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None, language: str = "English") -> str:
-    title_text = _mathify(title)
+    title_text = _strip_markdown(_mathify(title))
     title_html = title_text
     clean_url = _clean_link(url)
     if clean_url:
@@ -168,13 +190,13 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
         note_html = (
             f'<div style="margin-top:10px;font-size:13px;color:#4c1d95;'
             f'background:#f5f3ff;border-left:4px solid #a855f7;padding:10px 16px;'
-            f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(reason)}</div>'
+            f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(_strip_markdown(reason))}</div>'
         )
     elif tldr:
         note_html = (
             f'<div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;'
             f'background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">'
-            f'<strong>{tldr_label}:</strong> {_safe(tldr)}</div>'
+            f'<strong>{tldr_label}:</strong> {_safe(_strip_markdown(tldr))}</div>'
         )
 
     buttons = ""
@@ -268,7 +290,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     if digest is None:
         return render_fallback(originals or [])
 
-    title = _safe(_mathify(digest.subject)) or "Daily paper digest"
+    title = _safe(_strip_markdown(_mathify(digest.subject))) or "Daily paper digest"
     today = _today_str()
     # Avoid a duplicated date: the agent's subject often already carries one
     # (e.g. "... | 2026-08-02"). Only add the date to the summary line when
@@ -279,8 +301,8 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     else:
         n_label = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
         summary = (f"{today} · " if not subject_has_date else "") + n_label
-    intro = _safe(_mathify(digest.intro))
-    outro = _safe(_mathify(digest.outro))
+    intro = _safe(_strip_markdown(_mathify(digest.intro)))
+    outro = _safe(_strip_markdown(_mathify(digest.outro)))
 
     cards = ""
     selected_indices: set[int] = set()

@@ -49,6 +49,7 @@ executor:
   debug: false # Whether to use debug mode. Example: true
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_paper_num: 100 # The maximum number of the papers presented in the email. Example: 100
+  min_score: null # Minimum relevance score (0-10) to include a paper; null = keep all. Example: 0.5
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
   rerank_alpha: 0.7 # Hybrid rerank weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only. Example: 0.7

@@ -33,9 +33,13 @@ def main(config:DictConfig):
 
     if config.executor.debug:
         logger.info("Debug mode is enabled")
-    
-    executor = Executor(config)
-    executor.run()
+
+    try:
+        executor = Executor(config)
+        executor.run()
+    except Exception as exc:
+        logger.exception(f"Fatal error during execution: {exc}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

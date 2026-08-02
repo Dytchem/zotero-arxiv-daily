@@ -19,3 +19,6 @@ outputs
 config/private.yaml.coverage
 htmlcov/
 .cache/
+
+# coverage artifacts
+.coverage

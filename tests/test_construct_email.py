@@ -57,6 +57,45 @@ def test_get_block_html_contains_all_fields():
     assert "MIT" in html
 
 
+def test_get_block_html_with_url_and_source():
+    html = get_block_html(
+        "Title", "Auth", "3.5", "Summary", "http://pdf.url", "MIT",
+        url="http://arxiv.org/abs/1", source="arxiv",
+    )
+    assert 'href="http://arxiv.org/abs/1"' in html
+    assert ">arXiv</span>" in html
+    assert "Abstract" in html
+
+
+def test_get_block_html_no_pdf_no_url():
+    html = get_block_html("Title", "Auth", "3.5", "Summary", None, None)
+    assert "PDF" not in html
+    assert "Abstract" not in html
+
+
+def test_render_email_summary_header():
+    papers = [make_sample_paper(score=7.0, tldr="ok"), make_sample_paper(title="Two", score=6.0, tldr="ok2")]
+    html = render_email(papers)
+    assert "2 papers recommended for you" in html
+
+
+def test_render_email_single_paper_singular():
+    html = render_email([make_sample_paper(score=7.0, tldr="ok")])
+    assert "1 paper recommended for you" in html
+
+
+def test_render_email_source_badges():
+    from zotero_arxiv_daily.protocol import Paper
+
+    biorxiv = Paper(
+        source="biorxiv", title="Bio Paper", authors=["A"], abstract="x",
+        url="https://www.biorxiv.org/content/1v1", pdf_url="https://www.biorxiv.org/content/1v1.full.pdf",
+        score=6.0, tldr="bio",
+    )
+    html = render_email([biorxiv])
+    assert ">bioRxiv</span>" in html
+
+
 def test_get_empty_html():
     html = get_empty_html()
     assert "No Papers Today" in html

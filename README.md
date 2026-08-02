@@ -82,6 +82,7 @@ zotero:
 email:
   sender: ${oc.env:SENDER}
   receiver: ${oc.env:RECEIVER}
+  receivers: null # Optional extra recipients (Cc), e.g. ["friend@outlook.com", "team@example.com"]
   smtp_server: smtp.qq.com
   smtp_port: 465
   sender_password: ${oc.env:SENDER_PASSWORD}
@@ -101,6 +102,7 @@ source:
 executor:
   debug: ${oc.env:DEBUG,null}
   source: ['arxiv']
+  # min_score: 0.5 # Optional: only keep papers with relevance score >= this (0-10). null keeps all.
 ```
 Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
 >[!NOTE]
@@ -125,6 +127,7 @@ source:
 email:
   sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
   receiver: ??? # The email account that receives the paper list. Example: abc@outlook.com
+  receivers: null # Optional list of extra recipients (Cc). Example: ["friend@outlook.com", "team@example.com"]
   smtp_server: ??? # The SMTP server that sends the email. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server. Example: smtp.qq.com
   smtp_port: ??? # The port of SMTP server. Example: 465
   sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
@@ -156,6 +159,7 @@ executor:
   debug: false # Whether to use debug mode. Example: true
   send_empty: false # Whether to send an empty email even if no new papers today. Example: true
   max_paper_num: 100 # The maximum number of the papers presented in the email. Example: 100
+  min_score: null # Minimum relevance score (0-10) to include a paper; null keeps all. Example: 0.5
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
 ```

@@ -379,3 +379,51 @@ def test_dedupe_papers_by_url():
     ]
     deduped = Executor._dedupe_papers(papers)
     assert [p.title for p in deduped] == ["A", "B"]
+
+
+def test_dedupe_papers_by_normalized_title():
+    """The same preprint on arXiv + bioRxiv (different URLs) is dropped by title."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    papers = [
+        make_sample_paper(title="Attention Is All You Need", source="arxiv", url="https://arxiv.org/abs/1706.03762"),
+        make_sample_paper(title="Attention is all you need!", source="biorxiv", url="https://www.biorxiv.org/content/10.1101/123v1"),
+        make_sample_paper(title="A Different Paper", source="arxiv", url="https://arxiv.org/abs/9999.99999"),
+    ]
+    deduped = Executor._dedupe_papers(papers)
+    assert [p.title for p in deduped] == ["Attention Is All You Need", "A Different Paper"]
+
+
+def test_normalize_title():
+    from zotero_arxiv_daily.executor import Executor
+
+    assert Executor._normalize_title("Attention Is All You Need") == "attentionisallyouneed"
+    assert Executor._normalize_title("Attention is all you need!") == "attentionisallyouneed"
+
+
+def test_filter_min_score_keeps_above_threshold():
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    cfg = OmegaConf.create({"executor": {"min_score": 5.0}})
+    executor.config = cfg
+    papers = [
+        make_sample_paper(title="High", score=8.0),
+        make_sample_paper(title="Mid", score=5.0),
+        make_sample_paper(title="Low", score=1.5),
+        make_sample_paper(title="No score"),
+    ]
+    kept = executor._filter_min_score(papers)
+    assert [p.title for p in kept] == ["High", "Mid"]
+
+
+def test_filter_min_score_none_keeps_all():
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"min_score": None}})
+    papers = [make_sample_paper(title="Low", score=0.1)]
+    assert executor._filter_min_score(papers) == papers

@@ -12,7 +12,7 @@ framework = """
   <div style="background:#ffffff;border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,0.06);overflow:hidden;">
     <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);padding:22px 28px;">
       <div style="color:#ffffff;font-size:22px;font-weight:700;">Daily arXiv</div>
-      <div style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:4px;">Tailored to your Zotero library</div>
+      <div style="color:rgba(255,255,255,0.85);font-size:13px;margin-top:4px;">__SUMMARY__</div>
     </div>
     <div style="padding:24px 28px;">
       __CONTENT__
@@ -26,6 +26,12 @@ framework = """
 </html>
 """
 
+_SOURCE_LABELS = {
+    "arxiv": "arXiv",
+    "biorxiv": "bioRxiv",
+    "medrxiv": "medRxiv",
+}
+
 
 def get_empty_html():
     return """
@@ -36,9 +42,46 @@ def get_empty_html():
     """
 
 
-def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affiliations:str | None=None):
+def get_block_html(
+    title: str,
+    authors: str,
+    rate: str,
+    tldr: str,
+    pdf_url: str | None,
+    affiliations: str | None = None,
+    url: str | None = None,
+    source: str | None = None,
+):
+    title_html = (
+        f'<a href="{url}" style="color:#111827;text-decoration:none;">{title}</a>'
+        if url
+        else title
+    )
+    badge_html = ""
+    if source:
+        label = _SOURCE_LABELS.get(source, source)
+        badge_html = (
+            f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;'
+            f'font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;'
+            f'margin-bottom:6px;">{label}</span>'
+        )
+    pdf_button = ""
+    if pdf_url:
+        pdf_button = (
+            f'<a href="{pdf_url}" style="display:inline-block;text-decoration:none;font-size:13px;'
+            f'font-weight:700;color:#ffffff;background:linear-gradient(135deg,#2563eb,#4f46e5);'
+            f'padding:9px 18px;border-radius:8px;">PDF</a>'
+        )
+    abs_button = (
+        f'<a href="{url}" style="display:inline-block;text-decoration:none;font-size:13px;'
+        f'font-weight:700;color:#2563eb;border:1px solid #2563eb;padding:8px 18px;'
+        f'border-radius:8px;margin-left:8px;">Abstract</a>'
+        if url
+        else ""
+    )
     block_template = """
     <div style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:16px;background:#ffffff;">
+      {badge}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title}</div>
       <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">
         {authors}
@@ -51,18 +94,30 @@ def get_block_html(title:str, authors:str, rate:str, tldr:str, pdf_url:str, affi
         <strong>TLDR:</strong> {tldr}
       </div>
       <div style="margin-top:14px;">
-        <a href="{pdf_url}" style="display:inline-block;text-decoration:none;font-size:13px;font-weight:700;color:#ffffff;background:linear-gradient(135deg,#2563eb,#4f46e5);padding:9px 18px;border-radius:8px;">PDF</a>
+        {pdf_button}{abs_button}
       </div>
     </div>
     """
-    return block_template.format(title=title, authors=authors,rate=rate, tldr=tldr, pdf_url=pdf_url, affiliations=affiliations)
+    return block_template.format(
+        badge=badge_html,
+        title=title_html,
+        authors=authors,
+        rate=rate,
+        tldr=tldr,
+        affiliations=affiliations,
+        pdf_button=pdf_button,
+        abs_button=abs_button,
+    )
 
 
-def render_email(papers:list[Paper]) -> str:
+def render_email(papers: list[Paper]) -> str:
     parts = []
-    if len(papers) == 0 :
-        return framework.replace('__CONTENT__', get_empty_html())
+    if len(papers) == 0:
+        html = framework.replace("__CONTENT__", get_empty_html())
+        return html.replace("__SUMMARY__", "No new papers today")
 
+    total = len(papers)
+    summary = f"{total} paper{'s' if total > 1 else ''} recommended for you"
     for p in papers:
         rate = round(p.score, 1) if p.score is not None else 'Unknown'
         author_list = list(p.authors)
@@ -78,7 +133,13 @@ def render_email(papers:list[Paper]) -> str:
                 affiliations += ', ...'
         else:
             affiliations = 'Unknown Affiliation'
-        parts.append(get_block_html(p.title, authors, rate, p.tldr, p.pdf_url, affiliations))
+        parts.append(
+            get_block_html(
+                p.title, authors, rate, p.tldr, p.pdf_url, affiliations,
+                url=p.url, source=p.source,
+            )
+        )
 
     content = ''.join(parts)  # cards carry their own spacing
-    return framework.replace('__CONTENT__', content)
+    html = framework.replace('__CONTENT__', content)
+    return html.replace('__SUMMARY__', summary)

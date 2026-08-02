@@ -1,4 +1,5 @@
 import random
+import re
 from datetime import datetime
 
 from loguru import logger
@@ -143,16 +144,42 @@ class Executor:
                 pass
 
     @staticmethod
+    def _normalize_title(title: str) -> str:
+        """Lowercase alphanumerics only — used to match the same paper across sources."""
+        return re.sub(r"[^a-z0-9]+", "", title.lower())
+
+    @staticmethod
     def _dedupe_papers(papers: list[Paper]) -> list[Paper]:
-        """Drop duplicate papers by URL (cross-listed categories can repeat entries)."""
-        seen: set[str] = set()
+        """Drop duplicate papers by URL or normalized title.
+
+        URL dedupe handles cross-listed arXiv categories (same entry repeats);
+        title dedupe catches the same preprint posted to both arXiv and bioRxiv.
+        """
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
         result = []
         for p in papers:
-            if p.url in seen:
+            if p.url in seen_urls:
                 continue
-            seen.add(p.url)
+            title_key = Executor._normalize_title(p.title)
+            if title_key and title_key in seen_titles:
+                continue
+            seen_urls.add(p.url)
+            if title_key:
+                seen_titles.add(title_key)
             result.append(p)
         return result
+
+    def _filter_min_score(self, papers: list[Paper]) -> list[Paper]:
+        """Drop papers whose relevance score is below executor.min_score (null = keep all)."""
+        min_score = self.config.executor.get("min_score")
+        if min_score is None:
+            return papers
+        kept = [p for p in papers if p.score is not None and p.score >= min_score]
+        dropped = len(papers) - len(kept)
+        if dropped:
+            logger.info(f"Dropped {dropped} papers below min_score={min_score}")
+        return kept
 
     def _populate_full_text(self, paper: Paper) -> None:
         """Fetch full text lazily — only for papers that made it past reranking."""
@@ -189,11 +216,12 @@ class Executor:
         if len(all_papers) > 0:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
+            reranked_papers = self._filter_min_score(reranked_papers)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
             logger.info("Generating TLDR and affiliations...")
             self._generate_summaries(reranked_papers)
-        elif not self.config.executor.send_empty:
-            logger.info("No new papers found. No email will be sent.")
+        if not reranked_papers and not self.config.executor.send_empty:
+            logger.info("No qualifying papers found. No email will be sent.")
             return
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)

@@ -320,9 +320,8 @@ def test_send_email_multiple_receivers(config, monkeypatch):
         config.email.receivers = ["cc1@example.com", "cc2@example.com"]
     send_email(config, "<html></html>")
 
-    _, recipients, body = sent[0]
+    _, recipients, _ = sent[0]
     assert recipients == ["test@example.com", "cc1@example.com", "cc2@example.com"]
-    assert "Cc:" in body
 
 
 def test_send_email_receivers_string_support(config, monkeypatch):

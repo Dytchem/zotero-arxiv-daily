@@ -304,10 +304,11 @@ class Executor:
     # Delivery
     # ------------------------------------------------------------------
 
-    def _deliver(self, html: str) -> None:
+    def _deliver(self, html: str, subject: str | None = None) -> None:
         from .notifier import get_notifier_cls
         names = self.config.executor.get("notifiers") or ["email"]
-        subject = self._digest_subject()
+        if not subject:
+            subject = self._digest_subject()
         for name in names:
             notifier = get_notifier_cls(name)(self.config)
             logger.info(f"Delivering via notifier={name}...")
@@ -421,7 +422,8 @@ class Executor:
             logger.warning(f"Failed to archive rendered email: {exc}")
 
         logger.info("Delivering digest...")
-        self._deliver(html_content)
+        subject = (digest.subject if digest and digest.subject else None) or self._digest_subject()
+        self._deliver(html_content, subject=subject)
 
         if selected_papers and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
             sent = self._load_sent_history()

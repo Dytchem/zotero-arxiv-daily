@@ -408,7 +408,8 @@ class Executor:
             selected_papers = ranked
 
         logger.info("Rendering email...")
-        html_content = render_email(digest, originals=ranked)
+        language = (self.config.llm or {}).get("language", "English")
+        html_content = render_email(digest, originals=ranked, language=language)
 
         # Archive the rendered email for debugging / review (also uploaded as
         # a workflow artifact so we can inspect what the agent produced).

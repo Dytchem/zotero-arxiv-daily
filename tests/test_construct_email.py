@@ -82,6 +82,21 @@ def test_render_email_others_section_lists_unpicked_candidates():
     assert "Not Picked Two" in html
 
 
+def test_render_email_chinese_summary_and_others():
+    """Chinese language config localises the summary and other-candidates heading."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    originals = [_paper(0), _paper(1)]
+    html = render_email(digest, originals=originals, language="Chinese")
+    assert "精选 1 篇论文" in html
+    assert "其他候选" in html
+    assert "Other candidates" not in html
+
+
+def test_render_fallback_chinese_summary():
+    html = render_fallback([_paper(0)], language="Chinese")
+    assert "共 1 篇论文" in html
+
+
 def test_render_email_empty_digest():
     digest = Digest(subject="x", intro="", papers=[], outro="")
     html = render_email(digest, originals=[])

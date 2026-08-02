@@ -193,8 +193,9 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
     """
 
 
-def _others_block_html(papers: list[Paper]) -> str:
+def _others_block_html(papers: list[Paper], language: str = "English") -> str:
     """Compact list of candidates the agent did not pick (bottom of the email)."""
+    heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
     rows = ""
     for p in papers:
         title_text = _safe(_mathify(p.title))
@@ -210,12 +211,12 @@ def _others_block_html(papers: list[Paper]) -> str:
         )
     return (
         f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'
-        f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">Other candidates</div>'
+        f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">{heading}</div>'
         f'{rows}</div>'
     )
 
 
-def render_email(digest: Digest | None, originals: list[Paper] | None = None) -> str:
+def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English") -> str:
     """Render a Digest (or a plain fallback list) to HTML email.
 
     ``digest`` is the agent's structured output; when it is None we render the
@@ -225,7 +226,10 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None) ->
         return render_fallback(originals or [])
 
     title = _safe(_mathify(digest.subject)) or "Daily paper digest"
-    summary = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+    if language.lower().startswith("chinese"):
+        summary = f"精选 {len(digest.papers)} 篇论文"
+    else:
+        summary = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
     intro = _safe(_mathify(digest.intro))
     outro = _safe(_mathify(digest.outro))
 
@@ -259,7 +263,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None) ->
     if originals:
         others = [p for i, p in enumerate(originals) if i not in selected_indices]
         if others:
-            others_html = _others_block_html(others)
+            others_html = _others_block_html(others, language)
 
     content = cards + others_html
     html = framework.replace("__TITLE__", title)
@@ -269,7 +273,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None) ->
     return html.replace("__CONTENT__", content)
 
 
-def render_fallback(papers: list[Paper]) -> str:
+def render_fallback(papers: list[Paper], language: str = "English") -> str:
     """Gentle fallback: embedding-ordered cards with no agent editorial."""
     if not papers:
         return framework.replace("__TITLE__", "Daily paper digest").replace(
@@ -288,6 +292,10 @@ def render_fallback(papers: list[Paper]) -> str:
             source=p.source,
             score=p.score,
         )
+    if language.lower().startswith("chinese"):
+        summary = f"共 {len(papers)} 篇论文"
+    else:
+        summary = f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"
     return framework.replace("__TITLE__", "Daily paper digest").replace(
-        "__SUMMARY__", f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"
+        "__SUMMARY__", summary
     ).replace("__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", body)

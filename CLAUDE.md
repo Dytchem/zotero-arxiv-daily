@@ -44,6 +44,8 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_
 
 **Rerankers** (`src/zotero_arxiv_daily/reranker/`): Register via `@register_reranker` decorator, discovered by `get_reranker_cls()`. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint).
 
+**Notifiers** (`src/zotero_arxiv_daily/notifier.py`): Register via `@register_notifier`, discovered by `get_notifier_cls()`. The executor fans out the rendered digest to every channel in `executor.notifiers` (default `['email']`). Built-ins: `email` (SMTP, implemented in `email_sender.py`) and `webhook` (generic JSON POST). Add a channel by subclassing `BaseNotifier` and registering it.
+
 ### Configuration
 
 Uses Hydra + OmegaConf. Config is composed from `config/base.yaml` (defaults) + `config/custom.yaml` (user overrides). Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main`.

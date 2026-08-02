@@ -28,12 +28,14 @@
 ## 🇨🇳 中文简介
 
 **Zotero-arXiv-Daily** 每天根据你的 Zotero 文献库，从 arXiv / bioRxiv / medRxiv 自动检索
-与你研究兴趣相关的新论文，生成 TL;DR 摘要，并发送到你的邮箱📮。
+与你研究兴趣相关的新论文，发送到你的邮箱📮。
 
+- **LLM Harness 智能推荐**：两阶段推荐——先由 embedding 粗筛候选，再让 LLM 像人一样
+  阅读你的文献库（研究主题、关键词、方法），对候选论文打分并给出**推荐理由**，
+  邮件里直接告诉你为什么推这篇
 - 支持本地嵌入模型或 API 重排序（混合 BM25 + 向量相似度）
-- 论文按与你近期研究兴趣的相关度排序，可配置 `min_score` 过滤低相关论文
-- 同一预印本在 arXiv 与 bioRxiv 双发时自动去重，只推一次
-- 支持多收件人（`email.receivers`）
+- 支持多收件人（`email.receivers`）与多渠道通知（邮件 / Webhook：Telegram、Server酱等）
+- 可配置 `min_score` 过滤低相关论文、关键词白/黑名单、跨源去重、历史去重
 - 零成本部署：Fork 仓库 + 配置 GitHub Action Secrets 即可每日自动运行
 
 完整使用方式见下文英文文档。
@@ -45,7 +47,9 @@
 *Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
 
 ## ✨ Features
+- **LLM Harness smart recommendation** (new): two-stage rerank — embeddings narrow the candidate pool, then an LLM (own provider entry, e.g. `gpt-5.6-luna` via OpenRouter) reads a research profile distilled from your Zotero library, scores each paper and gives a one-line **recommendation reason** shown in the email.
 - Nearly free: local reranking runs on the GitHub Action runner within its quota (public repos); TL;DR generation uses an LLM API (bring your own key).
+- Three independent provider entries: `reranker.api` (embeddings), `llm.api` (TL;DR), `llm.harness.api` (recommendation reasoning) — each can point at its own provider/model.
 - Support API-based reranking (e.g. OpenRouter embeddings) instead of local models.
 - AI-generated TL;DR for you to quickly pick up target papers.
 - Affiliations of the paper are resolved and presented.
@@ -54,6 +58,9 @@
 - Fast deployment via fork this repo and set environment variables in the Github Action Page.
 - Support LLM API for generating TL;DR of papers.
 - Ignore unwanted Zotero papers using a list of glob patterns.
+- Multiple recipients (`email.receivers`) and multiple delivery channels (email / webhook for Telegram, Server酱, 钉钉, Discord, Slack).
+- Relevance threshold (`min_score`), keyword allow/block lists, cross-source and cross-run dedupe.
+- Machine-readable run report (`last_run.json`) and resilient per-source failure handling.
 - Support multiple sources of papers to retrieve:
   - arxiv
   - biorxiv
@@ -106,6 +113,16 @@ llm:
     base_url: ${oc.env:OPENAI_API_BASE}
   generation_kwargs:
     model: gpt-4o-mini
+  harness:
+  # Optional LLM Harness — independent provider entry (do NOT reuse
+  # reranker.api / llm.api keys). Enables two-stage smart recommendation.
+    enabled: false # Set true to enable. Example: true
+    top_k: 100
+    batch_size: 25
+    api:
+      key: ${oc.env:OPENAI_API_KEY} # e.g. OpenRouter key
+      base_url: ${oc.env:OPENAI_API_BASE} # e.g. https://openrouter.ai/api/v1
+      model: gpt-5.6-luna # reasoning model for recommendation
 
 source:
   arxiv:
@@ -148,13 +165,25 @@ email:
 
 llm:
   api:
-    key: ??? # API Key of your LLM API. Example: sk-xxx
-    base_url: ??? # API URL of your LLM API. Example: https://api.openai.com/v1
+    key: ??? # API Key of your LLM API (TL;DR generation, e.g. Ollama). Example: sk-xxx
+    base_url: ??? # API URL of your LLM API. Example: http://localhost:11434/v1
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
     model: ???
   language: English # Preferred language for the TL;DR. Example: English
+  harness:
+  # LLM Harness — stage-2 smart recommendation (independent provider entry).
+  # Embeddings narrow the candidates, then this LLM scores them and writes
+  # a one-line recommendation reason per paper.
+    enabled: false # Set true to enable. Example: true
+    top_k: 100 # How many embedding-ranked candidates to score. Example: 100
+    batch_size: 25 # Candidates per scoring call. Example: 25
+    api:
+    # Fully independent entry — do not reuse reranker.api or llm.api keys.
+      key: null # API Key (e.g. OpenRouter). Example: sk-xxx
+      base_url: null # API URL. Example: https://openrouter.ai/api/v1
+      model: null # Reasoning model. Example: gpt-5.6-luna
 
 reranker:
   local:

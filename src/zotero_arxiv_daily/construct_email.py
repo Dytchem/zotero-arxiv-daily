@@ -51,6 +51,7 @@ def get_block_html(
     affiliations: str | None = None,
     url: str | None = None,
     source: str | None = None,
+    reason: str | None = None,
 ):
     title_html = (
         f'<a href="{url}" style="color:#111827;text-decoration:none;">{title}</a>'
@@ -64,6 +65,13 @@ def get_block_html(
             f'<span style="display:inline-block;background:#eef2ff;color:#4f46e5;'
             f'font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;'
             f'margin-bottom:6px;">{label}</span>'
+        )
+    reason_html = ""
+    if reason:
+        reason_html = (
+            f'<div style="margin-top:10px;font-size:13px;color:#6d28d9;'
+            f'background:#faf5ff;border-left:4px solid #a855f7;padding:8px 12px;'
+            f'border-radius:6px;"><strong>Why:</strong> {reason}</div>'
         )
     pdf_button = ""
     if pdf_url:
@@ -90,6 +98,7 @@ def get_block_html(
       <div style="margin-top:10px;">
         <span style="display:inline-block;background:#eef2ff;color:#4f46e5;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">Relevance: {rate}</span>
       </div>
+      {reason}
       <div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">
         <strong>TLDR:</strong> {tldr}
       </div>
@@ -105,6 +114,7 @@ def get_block_html(
         rate=rate,
         tldr=tldr,
         affiliations=affiliations,
+        reason=reason_html,
         pdf_button=pdf_button,
         abs_button=abs_button,
     )
@@ -136,7 +146,7 @@ def render_email(papers: list[Paper]) -> str:
         parts.append(
             get_block_html(
                 p.title, authors, rate, p.tldr, p.pdf_url, affiliations,
-                url=p.url, source=p.source,
+                url=p.url, source=p.source, reason=p.recommend_reason,
             )
         )
 

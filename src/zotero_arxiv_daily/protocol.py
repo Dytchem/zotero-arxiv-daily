@@ -23,6 +23,7 @@ class Paper:
     affiliations: list[str] | None = None
     score: float | None = None
     source_url: str | None = None
+    recommend_reason: str | None = None
 
     def _generate_tldr_with_llm(self, openai_client:OpenAI,llm_params:dict) -> str:
         lang = llm_params.get('language', 'English')

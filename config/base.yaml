@@ -30,6 +30,16 @@ llm:
     max_tokens: 16384
     model: ???
   language: English # Preferred language for the TL;DR. Example: English
+  harness:
+    enabled: false # LLM Harness: stage-2 smart rerank (research profile + LLM scoring) on top of the embedding rerank. Example: true
+    top_k: 100 # How many embedding-ranked candidates to send to the LLM for scoring. Example: 100
+    batch_size: 25 # Candidates per LLM scoring call. Example: 25
+    api:
+    # Fully independent provider entry for the harness stage — do NOT share
+    # with reranker.api or llm.api. Each stage keeps its own provider/model.
+      key: null # API Key of the harness LLM (e.g. OpenRouter). Example: sk-xxx
+      base_url: null # API URL of the harness LLM. Example: https://openrouter.ai/api/v1
+      model: null # The model for recommendation reasoning. Example: gpt-5.6-luna
 
 reranker:
   local:

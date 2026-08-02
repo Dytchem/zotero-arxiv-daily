@@ -44,7 +44,6 @@ class Executor:
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
         self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
         self._validate_config()
-
     def _validate_config(self) -> None:
         """Fail fast with a clear message instead of silently sending no email."""
         def _missing(value) -> bool:
@@ -313,6 +312,23 @@ class Executor:
         except Exception as exc:
             logger.warning(f"Failed to write run report: {exc}")
 
+    def _llm_rerank(self, candidates: list[Paper], corpus: list[CorpusPaper]) -> list[Paper]:
+        """Stage-2 LLM harness rerank: build (cached) research profile, then
+        have the LLM score the embedding-ranked candidates.
+
+        Best-effort — any failure falls back to the embedding order.
+        """
+        from .harness import LLMHarness
+
+        harness = LLMHarness(self.config)
+        if not harness.enabled or not candidates:
+            return candidates
+        profile = harness.build_profile(corpus)
+        if profile is None:
+            logger.warning("LLM harness: no profile, keeping embedding order")
+            return candidates
+        return harness.rerank(candidates, profile)
+
     def run(self):
         import time
         t0 = time.time()
@@ -342,6 +358,7 @@ class Executor:
         if len(all_papers) > 0:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
+            reranked_papers = self._llm_rerank(reranked_papers, corpus)
             reranked_papers = self._filter_min_score(reranked_papers)
             reranked_papers = self._filter_keywords(reranked_papers)
             reranked_papers = self._filter_sent_history(reranked_papers)

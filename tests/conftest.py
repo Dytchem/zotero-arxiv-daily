@@ -3,12 +3,12 @@
 All mocking uses pytest monkeypatch + SimpleNamespace. No unittest.mock.
 """
 
-import copy
 from pathlib import Path
 
 import pytest
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
+from omegaconf import OmegaConf
 
 _CONFIG_DIR = str(Path(__file__).resolve().parent.parent / "config")
 
@@ -51,8 +51,12 @@ def _base_config():
 
 @pytest.fixture()
 def config(_base_config):
-    """Function-scoped deep copy of the session config.
+    """Function-scoped, fully mutable copy of the session config.
 
-    Safe to mutate inside any test without polluting other tests.
+    Hydra's compose() freezes the resulting tree, so deepcopy keeps the
+    read-only markers; ``OmegaConf.structured(to_container(struct))`` lifts
+    them recursively so tests can ``setattr`` arbitrary leaves (e.g.
+    ``config.executor.cache_dir``) without hitting read-only errors.
     """
-    return copy.deepcopy(_base_config)
+    container = OmegaConf.to_container(_base_config, resolve=True)
+    return OmegaConf.structured(container)

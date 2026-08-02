@@ -1,6 +1,7 @@
 """Tests for zotero_arxiv_daily.executor: normalize_path_patterns, filter_corpus, fetch_zotero_corpus, E2E."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from omegaconf import OmegaConf
@@ -175,8 +176,8 @@ def test_run_end_to_end(config, monkeypatch):
     monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
     monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
     retrieved = [
-        make_sample_paper(title="E2E Paper 1", score=None),
-        make_sample_paper(title="E2E Paper 2", score=None),
+        make_sample_paper(title="E2E Paper 1", score=None, url="https://arxiv.org/abs/test-e2e-paper-1"),
+        make_sample_paper(title="E2E Paper 2", score=None, url="https://arxiv.org/abs/test-e2e-paper-2"),
     ]
 
     # Import to register the arxiv retriever
@@ -197,6 +198,13 @@ def test_run_end_to_end(config, monkeypatch):
 
     # 6. Run
     executor = Executor(config)
+    # Defensive clean: reranker.api writes a corpus_embeddings.json next to
+    # sent_papers.json; stale state from a previous run can otherwise leak
+    # into this test and cause `Dropped N already sent` even on a fresh tmp.
+    cache_dir = Path(config.executor.cache_dir)
+    for stale in (cache_dir / "corpus_embeddings.json", cache_dir / "sent_papers.json"):
+        if stale.exists():
+            stale.unlink()
     executor.run()
 
     # Assertions
@@ -205,7 +213,7 @@ def test_run_end_to_end(config, monkeypatch):
     assert "text/html" in email_body
 
 
-def test_run_no_papers_send_empty_false(config, monkeypatch):
+def test_run_no_papers_send_empty_false(config, monkeypatch, tmp_path):
     """When no papers are found and send_empty=false, no email is sent."""
     import smtplib
 
@@ -217,6 +225,8 @@ def test_run_no_papers_send_empty_false(config, monkeypatch):
         config.executor.source = ["arxiv"]
         config.executor.reranker = "api"
         config.executor.send_empty = False
+        config.executor.cache_dir = str(tmp_path)
+        config.reranker.api.cache_dir = str(tmp_path)
 
     stub_zot = make_stub_zotero_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
@@ -239,7 +249,7 @@ def test_run_no_papers_send_empty_false(config, monkeypatch):
     assert len(sent) == 0, "No email should be sent when no papers and send_empty=false"
 
 
-def test_run_no_papers_send_empty_true(config, monkeypatch):
+def test_run_no_papers_send_empty_true(config, monkeypatch, tmp_path):
     """When no papers are found and send_empty=true, empty email is sent."""
     import smtplib
 
@@ -251,6 +261,8 @@ def test_run_no_papers_send_empty_true(config, monkeypatch):
         config.executor.source = ["arxiv"]
         config.executor.reranker = "api"
         config.executor.send_empty = True
+        config.executor.cache_dir = str(tmp_path)
+        config.reranker.api.cache_dir = str(tmp_path)
 
     stub_zot = make_stub_zotero_client()
     monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
@@ -424,3 +436,108 @@ def test_filter_min_score_none_keeps_all():
     executor.config = OmegaConf.create({"executor": {"min_score": None}})
     papers = [make_sample_paper(title="Low", score=0.1)]
     assert executor._filter_min_score(papers) == papers
+
+
+# ---------------------------------------------------------------------------
+# keyword filter
+# ---------------------------------------------------------------------------
+
+
+def test_filter_keywords_include_keeps_matching():
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"keywords_include": ["diffusion", "LLM"]}})
+    papers = [
+        make_sample_paper(title="Diffusion Models Rock", abstract="..."),
+        make_sample_paper(title="Something Else", abstract="mentions llm here"),
+        make_sample_paper(title="Unrelated", abstract="nothing"),
+    ]
+    kept = executor._filter_keywords(papers)
+    assert [p.title for p in kept] == ["Diffusion Models Rock", "Something Else"]
+
+
+def test_filter_keywords_exclude_drops_matching():
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"keywords_exclude": ["survey", "tutorial"]}})
+    papers = [
+        make_sample_paper(title="A Survey of X", abstract="..."),
+        make_sample_paper(title="Good Paper", abstract="no bad words"),
+        make_sample_paper(title="Tutorial Time", abstract="..."),
+    ]
+    kept = executor._filter_keywords(papers)
+    assert [p.title for p in kept] == ["Good Paper"]
+
+
+def test_filter_keywords_empty_config_keeps_all():
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"keywords_include": None, "keywords_exclude": None}})
+    papers = [make_sample_paper(title="Any", abstract="x")]
+    assert executor._filter_keywords(papers) == papers
+
+
+# ---------------------------------------------------------------------------
+# sent-history dedupe
+# ---------------------------------------------------------------------------
+
+
+def test_sent_history_roundtrip(tmp_path, monkeypatch):
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path)}})
+    executor._save_sent_history({"https://arxiv.org/abs/1", "https://arxiv.org/abs/2"})
+    assert executor._load_sent_history() == {"https://arxiv.org/abs/1", "https://arxiv.org/abs/2"}
+
+
+def test_sent_history_missing_file_returns_empty(tmp_path):
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path)}})
+    assert executor._load_sent_history() == set()
+
+
+def test_filter_sent_history_drops_previous_runs(tmp_path):
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path), "dedupe_history": True}})
+    executor._save_sent_history({"https://arxiv.org/abs/1"})
+    papers = [
+        make_sample_paper(title="Old", url="https://arxiv.org/abs/1"),
+        make_sample_paper(title="New", url="https://arxiv.org/abs/2"),
+    ]
+    kept = executor._filter_sent_history(papers)
+    assert [p.title for p in kept] == ["New"]
+
+
+def test_filter_sent_history_skipped_in_debug(tmp_path):
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path), "dedupe_history": True}})
+    executor._save_sent_history({"https://arxiv.org/abs/1"})
+    papers = [make_sample_paper(title="Old", url="https://arxiv.org/abs/1")]
+    executor.config.executor.debug = True
+    assert executor._filter_sent_history(papers) == papers
+
+
+def test_filter_sent_history_skipped_when_disabled(tmp_path):
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path), "dedupe_history": False}})
+    executor._save_sent_history({"https://arxiv.org/abs/1"})
+    papers = [make_sample_paper(title="Old", url="https://arxiv.org/abs/1")]
+    assert executor._filter_sent_history(papers) == papers

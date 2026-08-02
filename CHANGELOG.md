@@ -14,6 +14,9 @@ All notable changes to this project are documented here.
 - bioRxiv/medRxiv papers now link to the abstract page (`url`), with the PDF download as `pdf_url` (previously both pointed at the PDF).
 - Removed the pointless 1-second sleep per paper during conversion (~100s saved per 100 papers).
 - Chinese intro section in README.
+- `executor.keywords_include` / `keywords_exclude`: optional substring (case-insensitive) filters on title+abstract. Useful to lock in a topic ("diffusion", "LLM") or exclude meta-papers ("survey", "tutorial").
+- `executor.dedupe_history` (default `true`): papers already emailed in previous runs are skipped on re-runs. State is persisted to `executor.cache_dir/sent_papers.json`. Automatically bypassed in debug mode so re-runs always re-send.
+- `executor.cache_dir` (default `.cache`): centralized config for all run-state files.
 
 ### Changed
 - No-email decision now also triggers when every candidate was filtered out by `min_score` (previously only when zero papers were retrieved).

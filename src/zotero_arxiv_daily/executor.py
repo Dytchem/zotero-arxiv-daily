@@ -1,6 +1,8 @@
+import json
 import random
 import re
 from datetime import datetime
+from pathlib import Path
 
 from loguru import logger
 from omegaconf import DictConfig, ListConfig
@@ -181,6 +183,80 @@ class Executor:
             logger.info(f"Dropped {dropped} papers below min_score={min_score}")
         return kept
 
+    @staticmethod
+    def _matches_any(text: str, keywords: list[str] | ListConfig | None) -> bool:
+        """Case-insensitive substring match of any keyword against text."""
+        if not keywords:
+            return False
+        lowered = text.lower()
+        return any(k.lower() in lowered for k in keywords)
+
+    def _filter_keywords(self, papers: list[Paper]) -> list[Paper]:
+        """Apply executor.keywords_include / keywords_exclude on title+abstract."""
+        include = self.config.executor.get("keywords_include")
+        exclude = self.config.executor.get("keywords_exclude")
+        if not include and not exclude:
+            return papers
+
+        kept = []
+        for p in papers:
+            haystack = f"{p.title}\n{p.abstract}"
+            if include and not self._matches_any(haystack, include):
+                continue
+            if exclude and self._matches_any(haystack, exclude):
+                continue
+            kept.append(p)
+        dropped = len(papers) - len(kept)
+        if dropped:
+            logger.info(f"Dropped {dropped} papers by keyword filter (include={include}, exclude={exclude})")
+        return kept
+
+    # ------------------------------------------------------------------
+    # History dedupe — avoid re-sending the same paper across runs.
+    # ------------------------------------------------------------------
+
+    def _sent_history_path(self) -> Path:
+        cache_dir = self.config.executor.get("cache_dir") or ".cache"
+        return Path(cache_dir) / "sent_papers.json"
+
+    def _load_sent_history(self) -> set[str]:
+        """URLs emailed in previous runs (empty when no history file yet)."""
+        path = self._sent_history_path()
+        if not path.exists():
+            return set()
+        try:
+            data = json.loads(path.read_text())
+            return set(data.get("urls", []))
+        except Exception as exc:
+            logger.warning(f"Failed to load sent-history: {exc}")
+            return set()
+
+    def _save_sent_history(self, urls: set[str]) -> None:
+        """Persist the set of emailed URLs atomically."""
+        try:
+            path = self._sent_history_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"urls": sorted(urls)}))
+            tmp.replace(path)
+        except Exception as exc:
+            logger.warning(f"Failed to save sent-history: {exc}")
+
+    def _filter_sent_history(self, papers: list[Paper]) -> list[Paper]:
+        """Drop papers already emailed before. Skipped in debug mode (re-runs must repeat)."""
+        if self.config.executor.get("debug", False):
+            return papers
+        if not self.config.executor.get("dedupe_history", True):
+            return papers
+        sent = self._load_sent_history()
+        if not sent:
+            return papers
+        kept = [p for p in papers if p.url not in sent]
+        dropped = len(papers) - len(kept)
+        if dropped:
+            logger.info(f"Dropped {dropped} papers already sent in previous runs")
+        return kept
+
     def _populate_full_text(self, paper: Paper) -> None:
         """Fetch full text lazily — only for papers that made it past reranking."""
         if paper.full_text is not None:
@@ -217,6 +293,8 @@ class Executor:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
             reranked_papers = self._filter_min_score(reranked_papers)
+            reranked_papers = self._filter_keywords(reranked_papers)
+            reranked_papers = self._filter_sent_history(reranked_papers)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
             logger.info("Generating TLDR and affiliations...")
             self._generate_summaries(reranked_papers)
@@ -226,6 +304,10 @@ class Executor:
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)
         send_email(self.config, email_content)
+        if reranked_papers and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
+            sent = self._load_sent_history()
+            sent.update(p.url for p in reranked_papers)
+            self._save_sent_history(sent)
         logger.info(
             f"[summary] corpus={len(corpus)} candidates={len(all_papers)} "
             f"ranked={len(reranked_papers)} elapsed={time.time() - t0:.1f}s"

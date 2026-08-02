@@ -279,6 +279,28 @@ class Executor:
             logger.info(f"Delivering via notifier={name}...")
             notifier.send(html)
 
+    def _write_run_report(self, *, corpus: int, candidates: int, ranked: int, elapsed: float) -> None:
+        """Persist a machine-readable summary of this run to cache_dir/last_run.json."""
+        try:
+            import json
+
+            report = {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "corpus": corpus,
+                "candidates": candidates,
+                "ranked": ranked,
+                "elapsed_s": round(elapsed, 1),
+                "source": list(self.config.executor.source),
+                "reranker": self.config.executor.reranker,
+            }
+            path = self._sent_history_path().parent / "last_run.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(report, indent=2))
+            tmp.replace(path)
+        except Exception as exc:
+            logger.warning(f"Failed to write run report: {exc}")
+
     def run(self):
         import time
         t0 = time.time()
@@ -321,5 +343,9 @@ class Executor:
         logger.info(
             f"[summary] corpus={len(corpus)} candidates={len(all_papers)} "
             f"ranked={len(reranked_papers)} elapsed={time.time() - t0:.1f}s"
+        )
+        self._write_run_report(
+            corpus=len(corpus), candidates=len(all_papers),
+            ranked=len(reranked_papers), elapsed=time.time() - t0,
         )
         logger.info("Email sent successfully")

@@ -541,3 +541,38 @@ def test_filter_sent_history_skipped_when_disabled(tmp_path):
     executor._save_sent_history({"https://arxiv.org/abs/1"})
     papers = [make_sample_paper(title="Old", url="https://arxiv.org/abs/1")]
     assert executor._filter_sent_history(papers) == papers
+
+
+# ---------------------------------------------------------------------------
+# run report
+# ---------------------------------------------------------------------------
+
+
+def test_write_run_report(tmp_path):
+    import json
+
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path), "source": ["arxiv"], "reranker": "api"}})
+    executor._write_run_report(corpus=3, candidates=10, ranked=4, elapsed=2.5)
+
+    report_path = tmp_path / "last_run.json"
+    assert report_path.exists()
+    data = json.loads(report_path.read_text())
+    assert data["corpus"] == 3
+    assert data["candidates"] == 10
+    assert data["ranked"] == 4
+    assert data["elapsed_s"] == 2.5
+    assert data["source"] == ["arxiv"]
+    assert data["reranker"] == "api"
+    assert "ts" in data
+
+
+def test_write_run_report_does_not_raise_on_bad_config(tmp_path):
+    """Report writing must never break the pipeline (best-effort)."""
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor.__new__(Executor)
+    executor.config = OmegaConf.create({"executor": {"cache_dir": str(tmp_path)}})
+    executor._write_run_report(corpus=1, candidates=2, ranked=3, elapsed=0.1)  # no raise

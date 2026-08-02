@@ -1,6 +1,7 @@
 import multiprocessing
 import os
 from collections.abc import Callable
+from datetime import UTC
 from queue import Empty
 from tempfile import TemporaryDirectory
 from typing import Any, TypeVar
@@ -176,6 +177,11 @@ class ArxivRetriever(BaseRetriever):
                 f"arXiv RSS returned {total_entries} entries across categories — the feed may be "
                 f"truncated. Consider splitting categories or raising include_cross_list."
             )
+        # Weekends/holidays: arXiv publishes nothing, so the RSS feed is empty.
+        # When configured, fall back to the export API for the last N days
+        # (submittedDate range query) so the daily digest still has content.
+        if not raw_papers and self.config.source.arxiv.get("fallback_days"):
+            raw_papers = self._retrieve_from_api_fallback()
         # A paper cross-listed into several of the configured categories appears
         # once per feed; dedupe by paper id before returning.
         seen_ids: set[str] = set()
@@ -189,6 +195,32 @@ class ArxivRetriever(BaseRetriever):
         if self.config.executor.debug:
             raw_papers = raw_papers[:10]
         logger.info(f"Parsed {len(raw_papers)} papers from arXiv RSS ({', '.join(self.config.source.arxiv.category)})")
+        return raw_papers
+
+    def _retrieve_from_api_fallback(self) -> list[dict[str, Any]]:
+        """RSS empty (weekend/holiday) → pull the last N days via the export API."""
+        from datetime import datetime, timedelta
+
+        days = int(self.config.source.arxiv.fallback_days)
+        end = datetime.now(UTC)
+        start = end - timedelta(days=days)
+        start_s = start.strftime("%Y%m%d%H%M")
+        end_s = end.strftime("%Y%m%d%H%M")
+        logger.info(f"arXiv RSS empty; falling back to API for the last {days} day(s)")
+        raw_papers: list[dict[str, Any]] = []
+        for category in self.config.source.arxiv.category:
+            query = f"cat:{category}+AND+submittedDate:[{start_s}+TO+{end_s}]"
+            url = (
+                "https://export.arxiv.org/api/query?"
+                f"search_query={query}&start=0&max_results=200"
+                f"&sortBy=submittedDate&sortOrder=descending"
+            )
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                paper = _rss_entry_to_paper(entry)
+                # The API returns a plain arXiv id (no announce-type filtering);
+                # keep everything, dedupe happens in the caller.
+                raw_papers.append(paper)
         return raw_papers
 
     def convert_to_paper(self, raw_paper: dict[str, Any]) -> Paper:

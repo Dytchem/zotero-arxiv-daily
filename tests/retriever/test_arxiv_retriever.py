@@ -211,3 +211,60 @@ def test_fetch_full_text_short_circuits_on_tar_hit(config, monkeypatch):
     )
     retriever = ArxivRetriever(config)
     assert retriever.fetch_full_text(make_sample_paper()) == "tar text"
+
+
+def test_arxiv_retriever_api_fallback_on_empty_rss(config, mock_feedparser, monkeypatch):
+    """Empty RSS (weekend) + fallback_days set → pulls from the export API."""
+    import feedparser
+    from omegaconf import open_dict
+
+    empty = SimpleNamespace(entries=[], feed=SimpleNamespace(title=""))
+    api_feed = SimpleNamespace(
+        entries=mock_feedparser.entries[:3],
+        feed=SimpleNamespace(title="api"),
+    )
+
+    def _routing_parse(url_or_bytes, *args, **kwargs):
+        target = url_or_bytes.decode("utf-8", errors="ignore") if isinstance(url_or_bytes, bytes) else url_or_bytes
+        if "rss.arxiv.org" in target:
+            return empty
+        if "export.arxiv.org" in target:
+            return api_feed
+        return SimpleNamespace(entries=[], feed=SimpleNamespace(title=""))
+
+    monkeypatch.setattr(feedparser, "parse", _routing_parse)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
+
+    with open_dict(config.source):
+        config.source.arxiv = {"category": ["cs.AI"], "fallback_days": 7}
+    retriever = ArxivRetriever(config)
+    papers = retriever.retrieve_papers()
+    assert len(papers) == 3
+
+
+def test_arxiv_retriever_no_fallback_when_rss_has_papers(config, mock_feedparser, monkeypatch):
+    """fallback_days set but RSS non-empty → RSS wins, API never called."""
+    import feedparser
+    from omegaconf import open_dict
+
+    called_api = []
+    raw_parse = feedparser.parse
+
+    def _recording_parse(url_or_bytes, *args, **kwargs):
+        target = url_or_bytes.decode("utf-8", errors="ignore") if isinstance(url_or_bytes, bytes) else url_or_bytes
+        if "export.arxiv.org" in target:
+            called_api.append(target)
+        return raw_parse(url_or_bytes, *args, **kwargs)
+
+    monkeypatch.setattr(feedparser, "parse", _recording_parse)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_html", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_pdf", lambda paper: None)
+    monkeypatch.setattr(arxiv_retriever, "extract_text_from_tar", lambda paper: None)
+
+    with open_dict(config.source):
+        config.source.arxiv = {"category": ["cs.AI"], "fallback_days": 7}
+    retriever = ArxivRetriever(config)
+    retriever.retrieve_papers()
+    assert called_api == []

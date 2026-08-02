@@ -164,6 +164,13 @@ class ArxivRetriever(BaseRetriever):
             for entry in feed.entries
             if entry.get("arxiv_announce_type", "new") in allowed_announce_types
         ]
+        # The atom feed is capped by arXiv; warn when we are close to the limit
+        # so a silently truncated candidate list can be noticed.
+        if len(feed.entries) >= 1000:
+            logger.warning(
+                f"arXiv RSS returned {len(feed.entries)} entries — the feed may be "
+                f"truncated. Consider splitting categories or raising include_cross_list."
+            )
         if self.config.executor.debug:
             raw_papers = raw_papers[:10]
         logger.info(f"Parsed {len(raw_papers)} papers from arXiv RSS ({', '.join(self.config.source.arxiv.category)})")

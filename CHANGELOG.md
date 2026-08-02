@@ -58,6 +58,12 @@ All notable changes to this project are documented here.
   `Daily arXiv YYYY/MM/DD`).
 
 ### Fixed
+- Render layer strips stray Markdown the agent may leak into prose (`**bold**`,
+  `[label](url)`, `` `code` ``, `# headers`) — reasons/intro/outro never show
+  raw Markdown syntax in the email.
+- Sent-history now records every candidate that made it into the email (picked
+  AND "other candidates"), not just the picked ones — papers shown yesterday
+  are never re-shown, while fresh papers keep flowing in from the feeds.
 - arXiv RSS entries that use full `https://arxiv.org/abs/...` URLs as entry ids
   now yield a bare paper id, so derived PDF/e-print links no longer 404.
 - `Relevance` badge showed `n/a` for every card (the render layer hard-coded

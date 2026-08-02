@@ -3,15 +3,11 @@ import os
 from collections.abc import Callable
 from queue import Empty
 from tempfile import TemporaryDirectory
-from time import sleep
 from typing import Any, TypeVar
 
-import arxiv
 import feedparser
 import requests
-from arxiv import Result as ArxivResult
 from loguru import logger
-from tqdm import tqdm
 
 from ..protocol import Paper
 from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
@@ -109,6 +105,44 @@ def _extract_text_from_tar_worker(source_url: str, paper_id: str, paper_title: s
         return file_contents["all"]
 
 
+def _parse_abstract(summary: str) -> str:
+    """Extract the abstract from an arXiv Atom RSS entry summary.
+
+    The summary looks like: 'arXiv:2508.13426v1 Announce Type: new \\nAbstract: <text>'
+    """
+    if "Abstract:" in summary:
+        return summary.split("Abstract:", 1)[1].strip()
+    return summary.strip()
+
+
+def _parse_authors(entry: Any) -> list[str]:
+    """arXiv Atom RSS lists all authors as one comma-joined name string."""
+    names = getattr(entry, "authors", None) or []
+    if not names:
+        return []
+    raw = names[0].get("name", "") if isinstance(names[0], dict) else str(names[0])
+    return [a.strip() for a in raw.split(",") if a.strip()]
+
+
+def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
+    """Convert an arXiv Atom RSS entry to a Paper-ready dict.
+
+    The RSS feed already carries title, abstract, authors and announce type,
+    so we never need to hit the arXiv query API (which is rate-limited) just
+    to list the day's new papers. PDF/source URLs are derived from the ID.
+    """
+    paper_id = entry.id.removeprefix("oai:arXiv.org:")
+    return {
+        "paper_id": paper_id,
+        "title": entry.title,
+        "abstract": _parse_abstract(entry.get("summary", "")),
+        "authors": _parse_authors(entry),
+        "url": entry.get("link") or f"https://arxiv.org/abs/{paper_id}",
+        "pdf_url": f"https://arxiv.org/pdf/{paper_id}",
+        "source_url": f"https://arxiv.org/e-print/{paper_id}",
+    }
+
+
 @register_retriever("arxiv")
 class ArxivRetriever(BaseRetriever):
     def __init__(self, config):
@@ -116,79 +150,34 @@ class ArxivRetriever(BaseRetriever):
         if self.config.source.arxiv.category is None:
             raise ValueError("category must be specified for arxiv.")
 
-    def _retrieve_raw_papers(self) -> list[ArxivResult]:
-        client = arxiv.Client(num_retries=10, delay_seconds=10)
+    def _retrieve_raw_papers(self) -> list[dict[str, Any]]:
         query = '+'.join(self.config.source.arxiv.category)
         include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
-        # Get the latest paper from arxiv rss feed
+        # The RSS atom feed is arXiv's lightweight, rate-limit-free way to get
+        # the day's new submissions (official recommendation for this use case).
         feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
-        if 'Feed error for query' in feed.feed.title:
+        if getattr(feed.feed, "title", "") and "Feed error for query" in feed.feed.title:
             raise Exception(f"Invalid ARXIV_QUERY: {query}.")
-        raw_papers = []
         allowed_announce_types = {"new", "cross"} if include_cross_list else {"new"}
-        all_paper_ids = [
-            i.id.removeprefix("oai:arXiv.org:")
-            for i in feed.entries
-            if i.get("arxiv_announce_type", "new") in allowed_announce_types
+        raw_papers = [
+            _rss_entry_to_paper(entry)
+            for entry in feed.entries
+            if entry.get("arxiv_announce_type", "new") in allowed_announce_types
         ]
         if self.config.executor.debug:
-            all_paper_ids = all_paper_ids[:10]
-
-        # Get full information of each paper from arxiv api
-        bar = tqdm(total=len(all_paper_ids))
-        max_batch_retries = 5
-        batch_retry_delay = 30
-        for i in range(0, len(all_paper_ids), 20):
-            batch_ids = all_paper_ids[i:i + 20]
-            search = arxiv.Search(id_list=batch_ids)
-            for attempt in range(max_batch_retries):
-                try:
-                    batch = list(client.results(search))
-                    bar.update(len(batch))
-                    raw_papers.extend(batch)
-                    break
-                except arxiv.HTTPError as exc:
-                    if attempt >= max_batch_retries - 1:
-                        # Give up on the batch: degrade to per-paper requests so a
-                        # single bad/removed ID cannot kill the whole run.
-                        logger.warning(
-                            f"arXiv API batch {i // 20} failed after {max_batch_retries} "
-                            f"attempts (HTTP {exc.status}); falling back to per-paper requests"
-                        )
-                        for pid in batch_ids:
-                            try:
-                                single = list(client.results(arxiv.Search(id_list=[pid])))
-                                bar.update(len(single))
-                                raw_papers.extend(single)
-                            except Exception as single_exc:
-                                logger.warning(f"Skipping arXiv paper {pid}: {single_exc}")
-                            sleep(1)
-                        break
-                    wait = batch_retry_delay * (attempt + 1)
-                    logger.warning(
-                        f"arXiv API {exc.status} on batch {i // 20}, "
-                        f"retry {attempt + 1}/{max_batch_retries} in {wait}s"
-                    )
-                    sleep(wait)
-            if i + 20 < len(all_paper_ids):
-                sleep(3)
-        bar.close()
-
+            raw_papers = raw_papers[:10]
+        logger.info(f"Parsed {len(raw_papers)} papers from arXiv RSS ({', '.join(self.config.source.arxiv.category)})")
         return raw_papers
 
-    def convert_to_paper(self, raw_paper: ArxivResult) -> Paper:
-        title = raw_paper.title
-        authors = [a.name for a in raw_paper.authors]
-        abstract = raw_paper.summary
-        pdf_url = raw_paper.pdf_url
+    def convert_to_paper(self, raw_paper: dict[str, Any]) -> Paper:
         return Paper(
             source=self.name,
-            title=title,
-            authors=authors,
-            abstract=abstract,
-            url=raw_paper.entry_id,
-            pdf_url=pdf_url,
-            source_url=raw_paper.source_url(),
+            title=raw_paper["title"],
+            authors=raw_paper["authors"],
+            abstract=raw_paper["abstract"],
+            url=raw_paper["url"],
+            pdf_url=raw_paper["pdf_url"],
+            source_url=raw_paper["source_url"],
         )
 
     def fetch_full_text(self, paper: Paper) -> str | None:

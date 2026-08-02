@@ -17,7 +17,6 @@ dependencies = [
     "loguru>=0.7.3",
     "pyzotero>=1.10.0",
     "openai>=2.24.0",
-    "arxiv>=2.4.0",
     "pymupdf4llm>=0.3.4",
     "pymupdf-layout>=1.27.1",
     "dotenv>=0.9.9",

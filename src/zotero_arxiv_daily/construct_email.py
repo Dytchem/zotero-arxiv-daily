@@ -290,18 +290,23 @@ def _footer_html(language: str) -> str:
     return "To unsubscribe, remove your email in your GitHub Actions settings."
 
 
-def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None) -> str:
+def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None) -> str:
     """Compact list of candidates the agent did not pick (bottom of the email).
 
     Each entry shows the same Relevance + Work badges as the picked cards
     (on their own line, below the title — never inline with the title), plus
     an optional per-paper note. An LLM-written overall summary is shown above
     the list when provided.
+
+    ``indices`` (optional) carries the ORIGINAL candidate index for each
+    entry in ``papers`` — ``others_map`` is keyed by original index, so this
+    keeps the badges aligned after the list was re-indexed from 0.
     """
     heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
     others_map = others_map or {}
     rows = ""
     for i, p in enumerate(papers):
+        orig_index = indices[i] if indices else i
         title_text = _safe(_mathify(p.title))
         clean_url = _clean_link(p.url)
         link = f'<a href="{clean_url}" style="color:#111827;text-decoration:none;">{title_text}</a>' if clean_url else title_text
@@ -310,7 +315,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
             label = _SOURCE_LABELS.get(p.source, p.source)
             badge = f'<span style="background:#eef2ff;color:#4f46e5;font-size:10px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:8px;">{_safe(label)}</span>'
         # Same two chips as the picked cards, on their own line below the title.
-        meta = others_map.get(i, {})
+        meta = others_map.get(orig_index, {})
         work_score = meta.get("work_score")
         chips = _rate_html(p.score, language) + " " + _work_html(work_score, language, fallback_na=True)
         note = _safe(_strip_markdown(meta.get("note", "")))
@@ -398,7 +403,10 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     # the picked cards plus the agent's overall comment on them.
     others_html = ""
     if originals:
-        others = [p for i, p in enumerate(originals) if i not in selected_indices]
+        # Keep the ORIGINAL candidate index for each remaining paper so the
+        # badge map (keyed by original index) stays aligned.
+        others_indices = [i for i in range(len(originals)) if i not in selected_indices]
+        others = [originals[i] for i in others_indices]
         if others:
             others_map: dict[int, dict] = {}
             for entry in digest.others or []:
@@ -414,6 +422,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 language,
                 others_summary=digest.others_summary or "",
                 others_map=others_map,
+                indices=others_indices,
             )
 
     content = cards + others_html

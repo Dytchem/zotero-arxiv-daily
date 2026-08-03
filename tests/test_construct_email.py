@@ -371,3 +371,40 @@ def test_render_email_no_pdf_no_url():
     html = render_email(digest, originals=[paper])
     assert "PDF" not in html
     assert "Abstract" not in html
+
+
+def test_render_email_others_badges_aligned_when_picks_mid_list():
+    """Others badges/notes must map to the ORIGINAL candidate index.
+
+    Regression: when a picked paper sits in the middle of the list, the
+    remaining papers are re-indexed from 0, which used to misalign the
+    others_map (keyed by original index) and show Work: n/a + wrong notes.
+    """
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.construct_email import render_email
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    originals = [
+        make_sample_paper(title=f"Paper {i}", url=f"https://arxiv.org/abs/p{i}")
+        for i in range(4)
+    ]
+    digest = Digest(
+        subject="S", intro="I",
+        papers=[DigestPaper(index=1, reason="best", work_score=9.0)],  # pick index 1
+        outro="O",
+        others_summary="Rest were meh.",
+        others=[
+            {"index": 0, "work_score": 6.0, "note": "note-for-0"},
+            {"index": 2, "work_score": 5.0, "note": "note-for-2"},
+            {"index": 3, "work_score": 4.0, "note": "note-for-3"},
+        ],
+    )
+    html = render_email(digest, originals=originals, language="English")
+
+    # Every unpicked paper gets its own correct badge + note (no n/a, no swap).
+    assert "Work: n/a" not in html
+    assert "Work: 6.0" in html and "Work: 5.0" in html and "Work: 4.0" in html
+    assert "note-for-0" in html and "note-for-2" in html and "note-for-3" in html
+    # The picked paper is NOT in the others section at all.
+    assert "Paper 1" in html
+    assert "note-for-1" not in html

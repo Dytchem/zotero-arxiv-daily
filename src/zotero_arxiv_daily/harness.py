@@ -622,27 +622,32 @@ class HarnessAgent:
             "paper you have not inspected.\n"
             "3. FOCUS: use search_candidates to zoom into a topic, and "
             "compare_papers to weigh two candidates against each other when in doubt.\n"
-            "4. DECIDE — judge on TWO axes, and trust BOTH:\n"
+            "4. DECIDE — judge every candidate on the SAME two axes, and be strict:\n"
             "   (a) RELEVANCE: does the paper serve the profile's topics/methods? "
             "The embedding score is a cheap hint; your read of the actual content "
             "is authoritative.\n"
             "   (b) WORK QUALITY (most important — the web is full of watery papers): "
-            "score the paper's own merit 0-10 (work_score): is the method sound and "
-            "novel, are experiments/evidence complete, are the claims backed by the "
-            "content, and — critically — is the provenance credible (known labs / "
-            "real institutions / reputable venues) versus unknown or low-credibility "
-            "affiliations? A paper can rank high by embedding yet be shallow, padded, "
-            "or from a sketchy source — do not be fooled. Drop watery/low-quality "
-            "papers even when they look relevant, and never pad the digest with them.\n"
+            "assign work_score 0-10 using ONE consistent rubric across all papers:\n"
+            "       9-10: groundbreaking or definitive; rigorous methods, complete "
+            "            evidence, credible provenance (leading labs / real institutions)\n"
+            "       7-8:  solid, novel, well-executed; minor gaps only\n"
+            "       5-6:  competent but incremental or with notable weaknesses\n"
+            "       3-4:  shallow, padded, or seriously flawed; weak provenance\n"
+            "       0-2:  watery/低质, unsubstantiated, or from dubious sources\n"
+            "   Calibrate: a paper can rank high by embedding yet be shallow — do "
+            "not be fooled. Drop watery/low-quality papers even when they look "
+            "relevant, and never pad the digest with them.\n"
             "   (c) TASTE: the profile's taste line describes what this researcher "
             "actually values. Prefer papers that fit their taste (depth, style, "
             "provenance), not just topic keywords.\n"
-            "5. ORDER: the order of the papers array in submit_digest is exactly the "
-            "order of the cards in the email. Rank like an experienced researcher "
-            "recommending to a colleague: lead with the paper that best combines "
-            "(work quality x relevance x taste fit) for THIS reader — strongest "
-            "match, most important result, best timing. Do NOT sort by the embedding "
-            "score; your editorial judgement rules.\n"
+            "5. ORDER — the papers array order IS the email card order, and it must "
+            "be defensible. Sort primarily by work_score DESCENDING (the strongest "
+            "work first); break ties by relevance, then by taste fit. A paper with "
+            "higher work quality must NEVER appear below a clearly weaker one — the "
+            "reader will compare the Work badges and lose trust if the ordering looks "
+            "arbitrary. Only an explicit taste rationale may move a slightly lower-"
+            "scored paper above a slightly higher one, and you should say so in its "
+            "reason.\n"
             "6. WRITE: the digest in " + self.language + ". The subject should be "
             "short, informative, and in the same language; the intro should give "
             "context (what today's batch looks like overall); the outro should sign "
@@ -659,12 +664,13 @@ class HarnessAgent:
             "submit after you have inspected at least 3 papers with inspect_paper; "
             "if you try to submit earlier you will be asked to keep working.\n"
             "8. OTHER CANDIDATES: the reader also sees the candidates you did not "
-            "pick. Do not leave them bare — provide (a) an others_summary: a short "
-            "overall comment (2-4 sentences) on why the rest were skipped and whether "
-            "any is worth a skim, and (b) for candidates you seriously considered or "
-            "inspected but rejected, an entry in the others array with its index and "
-            "a work_score (same 0-10 scale) so the reader gets the same Work badge as "
-            "reference. Skip the ones you never looked at.\n\n"
+            "pick, and every single one of them gets the same Work badge — so you "
+            "must provide a work_score for EVERY unpicked candidate in the others "
+            "array (all of them, not just the ones you inspected deeply; use the "
+            "abstract/title evidence you already have and be honest about uncertainty). "
+            "Also provide (a) an others_summary: a short overall comment (2-4 sentences) "
+            "on why the rest were skipped and whether any is worth a skim. The reader "
+            "will see a missing Work badge as n/a, which looks sloppy — cover them all.\n\n"
             "Quality bar: reasons should be specific and insightful, not generic. "
             "Never invent content that is not in the paper's abstract or full text. "
             "If nothing is worth recommending, submit an empty papers list with an "
@@ -679,6 +685,18 @@ class HarnessAgent:
         inspected: set[int] = set()
         cached_tokens_total = 0
         prompt_tokens_total = 0
+
+        def _log_cache_stats() -> None:
+            if cached_tokens_total or prompt_tokens_total:
+                ratio = (
+                    cached_tokens_total / prompt_tokens_total
+                    if prompt_tokens_total
+                    else 0.0
+                )
+                logger.info(
+                    f"Prompt-cache: {cached_tokens_total}/{prompt_tokens_total} tokens "
+                    f"cached across {max_steps} steps ({ratio:.0%} hit rate)"
+                )
 
         for step in range(max_steps):
             try:
@@ -745,6 +763,7 @@ class HarnessAgent:
                         "tool_call_id": tc.id,
                         "content": "Digest received.",
                     })
+                    _log_cache_stats()
                     return digest
                 elif name == "inspect_candidates":
                     start = int(args.get("start", 0))
@@ -788,16 +807,7 @@ class HarnessAgent:
                         "content": "Unknown tool.",
                     })
 
-        if cached_tokens_total or prompt_tokens_total:
-            ratio = (
-                cached_tokens_total / prompt_tokens_total
-                if prompt_tokens_total
-                else 0.0
-            )
-            logger.info(
-                f"Prompt-cache: {cached_tokens_total}/{prompt_tokens_total} tokens "
-                f"cached across {max_steps} steps ({ratio:.0%} hit rate)"
-            )
+        _log_cache_stats()
         logger.warning("Harness agent reached max steps without submitting a digest")
         return digest
 
@@ -838,6 +848,13 @@ class HarnessAgent:
             "papers (weak methods, incomplete evidence, low-credibility provenance) "
             "even when they look relevant? Are the work_score values honest and "
             "defensible (0-10)? Is any recommended paper likely to be 水文/低质?\n"
+            "- Ordering (critical): is the card order defensible? Work quality must "
+            "descend — a clearly weaker paper listed above a stronger one (by "
+            "work_score, tie-break relevance) is a high-severity issue. Flag any "
+            "inversions; only a stated taste rationale justifies one.\n"
+            "- Others coverage: does the draft supply a work_score for every "
+            "unpicked candidate (or explicitly admit uncertainty)? Missing scores "
+            "render as n/a and look sloppy — flag gaps.\n"
             "- Taste fit: do the picks match the profile's taste line (depth, style, "
             "provenance expectations), not just topic keywords?\n"
             "- Specificity: is each reason concrete and tied to the paper, or a generic paraphrase?\n"

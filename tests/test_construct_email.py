@@ -160,6 +160,23 @@ def test_render_email_others_badge_not_inline_with_title():
     assert 'arXiv</span></div><div style="margin-top:6px;"><span style="display:inline-block;background:#eef2ff' in html
 
 
+def test_render_email_others_without_llm_score_show_na_badge():
+    """Unpicked candidates always keep a Work badge slot: when the agent gave
+    no work_score, it renders as a grey n/a instead of nothing."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="",
+    )
+    originals = [
+        _paper(0, title="Picked Paper", score=7.5),
+        _paper(1, title="Not Picked One", score=5.0),
+    ]
+    html = render_email(digest, originals=originals)
+    assert "Work: n/a" in html
+    assert "Relevance: 5.0" in html
+
+
 def test_render_email_chinese_summary_and_others():
     """Chinese language config localises the summary and other-candidates heading."""
     digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")

@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## [1.4.2] - 2026-08-04
+
+### Fixed
+- **Defensible card ordering**: the generator prompt now mandates work quality
+  descending (tie-break: relevance, then taste fit) with an explicit 0–10
+  rubric, and the evaluator audits ordering — a clearly weaker paper listed
+  above a stronger one is a high-severity issue. Previously the agent could
+  bury a strong paper (e.g. Work 9.0) below weaker picks.
+- **Other-candidates coverage**: the prompt now requires a work_score for
+  EVERY unpicked candidate (n/a renders as a grey badge when genuinely
+  missing), and the evaluator flags gaps. Previously most unpicked papers
+  showed no Work badge at all.
+- **Fixed subject applied before rendering**: the fixed
+  `Zotero-arXiv-Daily … · <date>` subject is set before `render_email`, so
+  the HTML title/preheader match the email header.
+- **Prompt-cache stats now always logged**: the cached-token summary prints
+  even on the normal submit path (previously skipped by the early return).
+
 ## [1.4.1] - 2026-08-03
 
 ### Added

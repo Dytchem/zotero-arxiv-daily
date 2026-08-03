@@ -484,6 +484,13 @@ class Executor:
         else:
             selected_papers = ranked
 
+        # Fixed subject format (repo + daily + date); the agent's free-style
+        # subject is discarded for a stable, scannable inbox. Set it BEFORE
+        # rendering so the HTML <title> and preheader match the email header.
+        subject = self._digest_subject()
+        if digest:
+            digest.subject = subject
+
         logger.info("Rendering email...")
         language = (self.config.llm or {}).get("language", "English")
         html_content = render_email(digest, originals=ranked, language=language)
@@ -498,11 +505,6 @@ class Executor:
             logger.warning(f"Failed to archive rendered email: {exc}")
 
         logger.info("Delivering digest...")
-        # Fixed subject format (repo + daily + date); the agent's free-style
-        # subject is discarded for a stable, scannable inbox.
-        subject = self._digest_subject()
-        if digest:
-            digest.subject = subject
         self._deliver(html_content, subject=subject)
 
         if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):

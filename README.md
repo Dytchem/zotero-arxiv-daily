@@ -226,7 +226,15 @@ A rendered digest looks like this:
 | **Outro** | Agent | Sign-off and look-ahead |
 | **Footer** | Template | Unsubscribe hint, localised |
 
-The **order of the cards is the agent's editorial ranking** — the paper it thinks matters most to you comes first. Each card carries two chips: **Relevance** (the cheap embedding/BM25 hint of topical match) and **Work** (the agent's own quality judgement of the paper — how rigorous, novel and trustworthy the work is). Trust the Work chip over the Relevance chip: the feed is full of papers that look on-topic but are shallow or from dubious provenance.
+The **card order is the agent's editorial ranking with a hard rule**: work
+quality descends — the strongest work comes first (tie-break: relevance,
+then taste fit). Each card carries two chips: **Relevance** (the cheap
+embedding/BM25 hint of topical match) and **Work** (the agent's own quality
+judgement of the paper — how rigorous, novel and trustworthy the work is,
+scored on a fixed 0–10 rubric). Trust the Work chip over the Relevance chip:
+the feed is full of papers that look on-topic but are shallow or from dubious
+provenance. Unpicked candidates below also carry both chips (n/a when the
+agent could not judge), plus an agent-written note on why they were skipped.
 
 ---
 

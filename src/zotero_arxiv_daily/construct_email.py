@@ -165,15 +165,19 @@ def _rate_html(score: float | None, language: str = "English") -> str:
     )
 
 
-def _work_html(score: float | None, language: str = "English") -> str:
+def _work_html(score: float | None, language: str = "English", fallback_na: bool = False) -> str:
     """Work-quality badge (LLM judgement of the paper's own merit) shown next
     to the relevance badge. Colored by tier so watery papers are visible at a
-    glance: green >= 7, amber 5-7, red < 5. Missing score renders as n/a."""
+    glance: green >= 7, amber 5-7, red < 5. Missing score renders as n/a when
+    ``fallback_na`` is set (other-candidates list: every paper keeps a badge
+    slot); otherwise hidden (embedding-order fallback has no LLM judgement)."""
     label = "工作水平" if language.lower().startswith("chinese") else "Work"
     if score is None:
-        # No LLM quality judgement (e.g. embedding-order fallback): hide the
-        # badge rather than showing a meaningless n/a next to Relevance.
-        return ""
+        if not fallback_na:
+            # No LLM quality judgement (e.g. embedding-order fallback): hide the
+            # badge rather than showing a meaningless n/a next to Relevance.
+            return ""
+        return f'<span style="display:inline-block;background:#f3f4f6;color:#9ca3af;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">{label}: n/a</span>'
     try:
         rate = round(float(score), 1)
     except (TypeError, ValueError):
@@ -308,7 +312,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
         # Same two chips as the picked cards, on their own line below the title.
         meta = others_map.get(i, {})
         work_score = meta.get("work_score")
-        chips = _rate_html(p.score, language) + " " + _work_html(work_score, language)
+        chips = _rate_html(p.score, language) + " " + _work_html(work_score, language, fallback_na=True)
         note = _safe(_strip_markdown(meta.get("note", "")))
         note_html = f'<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.45;">{note}</div>' if note else ""
         border = "border-bottom:1px solid #f3f4f6;" if i < len(papers) - 1 else ""
@@ -364,11 +368,10 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     if digest.papers:
         # Map candidate index -> original Paper so we can pull authors/url/pdf/source.
         originals_by_index = dict(enumerate(originals or []))
-        # Render picks in the agent's own editorial order: the agent is the
-        # expert who decides what matters most to this reader. It has been
-        # instructed to order its papers list by value (lead with the strongest
-        # or most useful pick, not by the raw embedding score). Trust its
-        # judgement instead of re-sorting by a number.
+        # Render picks in the agent's own editorial order. The agent is the
+        # expert: it has been instructed to rank by overall value (work
+        # quality x relevance x taste) and the evaluator audits that ordering,
+        # so the render layer trusts its judgement instead of re-sorting.
         for dp in digest.papers:
             paper = originals_by_index.get(dp.index)
             title_text = paper.title if paper else f"Paper {dp.index}"

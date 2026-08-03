@@ -63,6 +63,8 @@ class Digest:
     papers: list[DigestPaper] = field(default_factory=list)
     sections: list[dict] = field(default_factory=list)  # optional grouping
     outro: str = ""
+    others_summary: str = ""  # LLM's overall take on the unpicked candidates
+    others: list[dict] = field(default_factory=list)  # [{index, work_score, note?}] reference scores
 
 
 @dataclass
@@ -107,6 +109,26 @@ def _parse_work_score(value) -> float | None:
     return min(max(score, 0.0), 10.0)
 
 
+def _parse_others(value) -> list[dict]:
+    """Parse the optional ``others`` array (reference work_scores for
+    unpicked candidates). Returns [{index, work_score, note?}]."""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index", -1))
+        except (TypeError, ValueError):
+            continue
+        score = _parse_work_score(item.get("work_score"))
+        if idx < 0 or score is None:
+            continue
+        out.append({"index": idx, "work_score": score, "note": str(item.get("note", ""))})
+    return out
+
+
 def _today_str() -> str:
     """Today's date in the user's timezone (Asia/Shanghai), e.g. '2026-08-02 (Sunday)'."""
     try:
@@ -119,6 +141,27 @@ def _today_str() -> str:
         from datetime import datetime
 
         return datetime.now().strftime("%Y-%m-%d")
+
+
+def _cached_system_message(content: str) -> dict:
+    """System message marked with an explicit prompt-cache breakpoint.
+
+    In an agent loop the system prompt is the longest stable prefix across
+    every turn; marking its end lets the provider (OpenRouter/Anthropic/…)
+    cache it and reuse it on subsequent calls — prompt-cache hits cut cost
+    and latency. ``mode: "explicit"`` limits caching to this marked block;
+    automatic caching stays enabled for the rest of the prefix.
+    """
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": content,
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        ],
+    }
 
 
 def _extract_json(content: str) -> object:
@@ -424,6 +467,39 @@ class HarnessAgent:
                                 },
                             },
                             "outro": {"type": "string", "description": "closing paragraph"},
+                            "others_summary": {
+                                "type": "string",
+                                "description": (
+                                    "optional overall comment on the candidates you did NOT "
+                                    "pick: why they were skipped and whether any is worth a "
+                                    "skim (2-4 sentences). The reader sees this above the "
+                                    "'Other candidates' list."
+                                ),
+                            },
+                            "others": {
+                                "type": "array",
+                                "description": (
+                                    "optional reference work_scores for candidates you "
+                                    "inspected but did NOT recommend, so the reader gets "
+                                    "the same Work badge on them. Optional but recommended "
+                                    "for anything you seriously considered."
+                                ),
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "index": {"type": "integer"},
+                                        "work_score": {
+                                            "type": "number",
+                                            "description": (
+                                                "your quality judgement 0-10, same scale as "
+                                                "papers[].work_score"
+                                            ),
+                                        },
+                                        "note": {"type": "string", "description": "optional one-line why-not note"},
+                                    },
+                                    "required": ["index", "work_score"],
+                                },
+                            },
                         },
                         "required": ["subject", "intro", "papers", "outro"],
                     },
@@ -581,19 +657,28 @@ class HarnessAgent:
             "(0-10) reflecting your quality judgement — the reader sees it next to "
             "the relevance badge, so make it honest and defensible. You may only "
             "submit after you have inspected at least 3 papers with inspect_paper; "
-            "if you try to submit earlier you will be asked to keep working.\n\n"
+            "if you try to submit earlier you will be asked to keep working.\n"
+            "8. OTHER CANDIDATES: the reader also sees the candidates you did not "
+            "pick. Do not leave them bare — provide (a) an others_summary: a short "
+            "overall comment (2-4 sentences) on why the rest were skipped and whether "
+            "any is worth a skim, and (b) for candidates you seriously considered or "
+            "inspected but rejected, an entry in the others array with its index and "
+            "a work_score (same 0-10 scale) so the reader gets the same Work badge as "
+            "reference. Skip the ones you never looked at.\n\n"
             "Quality bar: reasons should be specific and insightful, not generic. "
             "Never invent content that is not in the paper's abstract or full text. "
             "If nothing is worth recommending, submit an empty papers list with an "
             "honest intro."
         )
 
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [_cached_system_message(system_prompt)]
         if feedback:
             messages.append({"role": "user", "content": feedback})
 
         digest: Digest | None = None
         inspected: set[int] = set()
+        cached_tokens_total = 0
+        prompt_tokens_total = 0
 
         for step in range(max_steps):
             try:
@@ -606,6 +691,23 @@ class HarnessAgent:
             except Exception as exc:
                 logger.warning(f"LLM harness call failed at step {step}: {exc}")
                 return None
+
+            # Prompt-cache observability: the system prompt (and the growing
+            # history prefix) should hit the provider's cache on later steps.
+            usage = getattr(response, "usage", None)
+            cached = 0
+            prompt = 0
+            if usage is not None:
+                details = getattr(usage, "prompt_tokens_details", None)
+                if details is not None:
+                    cached = int(getattr(details, "cached_tokens", 0) or 0)
+                prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+            cached_tokens_total += cached
+            prompt_tokens_total += prompt
+            if step > 0:
+                logger.debug(
+                    f"step {step}: prompt_tokens={prompt}, cached_tokens={cached}"
+                )
 
             msg = response.choices[0].message
             if not msg.tool_calls:
@@ -686,6 +788,16 @@ class HarnessAgent:
                         "content": "Unknown tool.",
                     })
 
+        if cached_tokens_total or prompt_tokens_total:
+            ratio = (
+                cached_tokens_total / prompt_tokens_total
+                if prompt_tokens_total
+                else 0.0
+            )
+            logger.info(
+                f"Prompt-cache: {cached_tokens_total}/{prompt_tokens_total} tokens "
+                f"cached across {max_steps} steps ({ratio:.0%} hit rate)"
+            )
         logger.warning("Harness agent reached max steps without submitting a digest")
         return digest
 
@@ -879,6 +991,8 @@ class HarnessAgent:
             papers=papers,
             sections=args.get("sections") or [],
             outro=str(args.get("outro", "")),
+            others_summary=str(args.get("others_summary", "")),
+            others=_parse_others(args.get("others")),
         )
 
     # -- fallback -------------------------------------------------------

@@ -279,16 +279,70 @@ class Executor:
         return digest
 
     def _populate_full_text(self, paper: Paper) -> None:
-        """Fetch full text lazily — only after the agent asks to inspect it."""
+        """Fetch full text lazily — only after the agent asks to inspect it.
+
+        Results are cached on disk (cache_dir/full_texts.json, keyed by URL) so
+        repeated runs do not re-download/re-parse the same PDFs — the agent's
+        on-demand reads hit the cache after the first time.
+        """
         if paper.full_text is not None:
+            return
+        cached = self._load_full_text(paper.url)
+        if cached:
+            paper.full_text = cached
             return
         retriever = self.retrievers.get(paper.source)
         if retriever is None:
             return
         try:
-            paper.full_text = retriever.fetch_full_text(paper)
+            text = retriever.fetch_full_text(paper)
+            if text:
+                paper.full_text = text
+                self._save_full_text(paper.url, text)
         except Exception as exc:
             logger.warning(f"Failed to fetch full text for {paper.title}: {exc}")
+
+    # -- full-text disk cache ------------------------------------------
+
+    def _full_text_cache_path(self) -> Path:
+        cache_dir = self.config.executor.get("cache_dir") or ".cache"
+        return Path(cache_dir) / "full_texts.json"
+
+    def _load_full_text(self, url: str) -> str | None:
+        try:
+            path = self._full_text_cache_path()
+            if not path.exists():
+                return None
+            data = json.loads(path.read_text())
+            text = data.get(url)
+            return text if isinstance(text, str) and text else None
+        except Exception as exc:
+            logger.warning(f"Failed to load full-text cache: {exc}")
+            return None
+
+    def _save_full_text(self, url: str, text: str) -> None:
+        try:
+            path = self._full_text_cache_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text())
+                except Exception:
+                    data = {}
+            # Bound the cache: keep the most recent N entries (FIFO-ish) so it
+            # cannot grow without limit.
+            max_entries = int(self.config.executor.get("full_text_cache_max", 200))
+            data[url] = text
+            if len(data) > max_entries:
+                # drop oldest keys (dict preserves insertion order)
+                for old in list(data)[: len(data) - max_entries]:
+                    data.pop(old, None)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(path)
+        except Exception as exc:
+            logger.warning(f"Failed to save full-text cache: {exc}")
 
     def _maybe_fetch_full_texts(self, candidates: list[Paper]) -> None:
         """Best-effort fetch full text for the candidates the agent might inspect.
@@ -321,9 +375,17 @@ class Executor:
             notifier.send(html, subject=subject)
 
     def _digest_subject(self) -> str:
-        sources = list(self.config.executor.source)
-        label = "arXiv" if sources == ["arxiv"] or len(sources) == 0 else "Digest (" + ", ".join(sources) + ")"
-        return f"Daily {label} {_dt.datetime.now().strftime('%Y/%m/%d')}"
+        """Fixed subject format: repo name + daily recommendation + date.
+
+        The subject is deliberately NOT left to the agent's free style — the
+        owner wants a stable, scannable format across days. The agent's
+        creative subject is discarded; only the body content is its own.
+        """
+        language = (self.config.llm or {}).get("language", "English")
+        now = _dt.datetime.now()
+        if language.lower().startswith("chinese"):
+            return f"Zotero-arXiv-Daily 每日推荐 · {now.year}年{now.month}月{now.day}日"
+        return f"Zotero-arXiv-Daily Daily Digest · {now.year}-{now.month:02d}-{now.day:02d}"
 
     def _write_run_report(
         self,
@@ -436,7 +498,11 @@ class Executor:
             logger.warning(f"Failed to archive rendered email: {exc}")
 
         logger.info("Delivering digest...")
-        subject = (digest.subject if digest and digest.subject else None) or self._digest_subject()
+        # Fixed subject format (repo + daily + date); the agent's free-style
+        # subject is discarded for a stable, scannable inbox.
+        subject = self._digest_subject()
+        if digest:
+            digest.subject = subject
         self._deliver(html_content, subject=subject)
 
         if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):

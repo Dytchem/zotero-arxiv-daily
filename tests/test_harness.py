@@ -10,6 +10,7 @@ from tests.canned_responses import make_sample_corpus, make_sample_paper
 from zotero_arxiv_daily.harness import (
     Digest,
     HarnessAgent,
+    _cached_system_message,
     _extract_json,
     _profile_prompt,
 )
@@ -134,6 +135,47 @@ def test_extract_json_with_fences():
 
 def test_extract_json_with_prose():
     assert _extract_json('Here you go: [{"index": 1, "score": 5}]') == [{"index": 1, "score": 5}]
+
+
+def test_cached_system_message_marks_cache_breakpoint():
+    """The generator's system message carries an explicit prompt-cache
+    breakpoint so the stable prefix hits the provider's cache across turns."""
+    msg = _cached_system_message("SYSTEM TEXT")
+    assert msg["role"] == "system"
+    block = msg["content"][0]
+    assert block["type"] == "text"
+    assert block["text"] == "SYSTEM TEXT"
+    assert block["prompt_cache_breakpoint"] == {"mode": "explicit"}
+
+
+def test_generate_uses_cached_system_message(config, tmp_path, monkeypatch):
+    """The generator loop sends the system prompt as a cache-breakpoint block
+    (prompt caching), not a plain string."""
+    tool_script = [
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 0}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 1}'}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": 2}'}}]},
+        {
+            "type": "assistant",
+            "tool_calls": [
+                {"function": {"name": "submit_digest", "arguments": json_dumps({
+                    "subject": "s", "intro": "",
+                    "papers": [{"index": 0, "reason": "r", "work_score": 7.0}], "outro": "",
+                })}},
+            ],
+        },
+    ]
+    harness, calls = _make_harness(config, tmp_path, monkeypatch, tool_script=tool_script)
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is not None
+    # find a generator (tool-calling) call and check the system message
+    gen_calls = [c for c in calls if c.get("tools")]
+    assert gen_calls
+    sys_msg = gen_calls[0]["messages"][0]
+    assert sys_msg["role"] == "system"
+    assert isinstance(sys_msg["content"], list)
+    assert sys_msg["content"][0]["prompt_cache_breakpoint"] == {"mode": "explicit"}
 
 
 def test_profile_prompt_truncates_long_abstracts():
@@ -502,6 +544,28 @@ def test_digest_from_args_clamps_work_score():
     )
     assert d.papers[0].work_score == 10.0
     assert d.papers[1].work_score == 0.0
+
+
+def test_digest_from_args_parses_others():
+    d = HarnessAgent._digest_from_args(
+        {"subject": "s", "intro": "", "papers": [
+            {"index": 0, "reason": "r", "work_score": 8.0},
+        ], "outro": "",
+         "others_summary": "The rest were mostly incremental.",
+         "others": [
+             {"index": 3, "work_score": 6.5, "note": "solid but incremental"},
+             {"index": 7, "work_score": "4"},
+             {"index": -1, "work_score": 9.0},  # bad index dropped
+             {"index": 9, "work_score": None},   # no score dropped
+             "garbage",
+         ]},
+        10,
+    )
+    assert d.others_summary == "The rest were mostly incremental."
+    assert d.others == [
+        {"index": 3, "work_score": 6.5, "note": "solid but incremental"},
+        {"index": 7, "work_score": 4.0, "note": ""},
+    ]
 
 
 def test_inspect_paper_fetches_full_text_on_demand(config, tmp_path, monkeypatch):

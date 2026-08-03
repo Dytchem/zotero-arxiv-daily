@@ -113,6 +113,53 @@ def test_render_email_others_section_lists_unpicked_candidates():
     assert "Not Picked Two" in html
 
 
+def test_render_email_others_have_badges_on_own_line():
+    """Unpicked candidates get the same Relevance + Work badges, on their own
+    line below the title — never inline with it."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r", work_score=8.0)],
+        outro="",
+        others_summary="The rest were mostly incremental.",
+        others=[{"index": 1, "work_score": 6.5, "note": "solid but incremental"}],
+    )
+    originals = [
+        _paper(0, title="Picked Paper", score=7.5),
+        _paper(1, title="Not Picked One", score=5.0),
+        _paper(2, title="Not Picked Two", score=4.2),
+    ]
+    html = render_email(digest, originals=originals)
+    # summary + note rendered
+    assert "The rest were mostly incremental." in html
+    assert "solid but incremental" in html
+    # unpicked candidate 1 has both badges
+    assert "Relevance: 5.0" in html
+    assert "Work: 6.5" in html
+    # unpicked candidate 2 (no LLM score) still gets a Relevance chip
+    assert "Relevance: 4.2" in html
+
+
+def test_render_email_others_badge_not_inline_with_title():
+    """The badges live on a separate line below the title (a <div> with margin),
+    not concatenated inside the title link line."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="",
+        others=[{"index": 1, "work_score": 7.0}],
+    )
+    originals = [
+        _paper(0, title="Picked Paper"),
+        _paper(1, title="Not Picked One"),
+    ]
+    html = render_email(digest, originals=originals)
+    # the title line and the chip line are separate blocks: the title's <div>
+    # (title + source badge) closes before the badges' <div> starts — the
+    # chips are never inline with the title.
+    assert 'Not Picked One</a><span style="background:#eef2ff;color:#4f46e5;font-size:10px' in html
+    assert 'arXiv</span></div><div style="margin-top:6px;"><span style="display:inline-block;background:#eef2ff' in html
+
+
 def test_render_email_chinese_summary_and_others():
     """Chinese language config localises the summary and other-candidates heading."""
     digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")

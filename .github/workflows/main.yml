@@ -1,6 +1,12 @@
 name: Send emails daily
 on:
   workflow_dispatch:
+    inputs:
+      reset_history:
+        description: 'Clear the sent-papers dedupe cache before running (use for testing so papers are not already marked as sent)'
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 22 * * *'
 
@@ -25,6 +31,10 @@ jobs:
           path: .cache
           key: corpus-embeddings
           restore-keys: corpus-embeddings-
+
+      - name: Reset sent-history (test mode)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.reset_history == 'true' }}
+        run: rm -f .cache/sent_papers.json
 
       - name: Run script
         env:

@@ -12,7 +12,7 @@
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-182-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-188-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -104,7 +104,10 @@ arXiv/bioRxiv/medRxiv 订阅源        你的 Zotero 文献库
 | 🧠 **单一智能体，完整编辑权** | 一个智能体循环读取你的画像、用工具审阅候选、撰写整封邮件 |
 | 🏆 **专家排序** | 邮件卡片的顺序就是智能体的编辑顺序 —— 而不是机械的分数排序 |
 | ⭐ **工作水平评分** | 每张卡片都带一个 **工作水平** 徽章（0–10）：智能体对该论文本身质量的评判 —— 严谨性、创新性、方法完备性、作者/机构可信度。即使向量相关度很高，水文/野鸡机构论文也会被揪出来 |
+| 🧾 **候选也带标签** | 未入选的论文同样获得 相关度 + 工作水平 两个标签（独立一行显示），并附智能体对这批候选为什么落选的整体点评 |
 | 🎯 **品味匹配** | 研究画像不仅提炼主题，还提炼研究者的 *品味* 与质量底线；选稿不仅看关键词重合，更看是否符合你的口味 |
+| ⚡ **提示词缓存友好** | agent 循环给稳定的系统提示词打上 prompt-cache 断点，多轮对话命中供应商缓存 —— 更省 token、更低延迟 |
+| 🧱 **固定邮件标题** | 邮件主题是固定的 `Zotero-arXiv-Daily … · <日期>` —— 可扫读，绝不自由发挥 |
 | 🔧 **真正的工具调用循环** | `inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest`，带硬性提交门禁（至少深挖 3 篇） |
 | ⚖️ **生成 + 评审双智能体** | 独立评审器给每份草稿打分（分数/问题/通过与否）；`revise` 会把问题反馈给生成器修订，最多 `max_revisions` 轮 |
 | 📝 **结构化输出** | 智能体提交类型化的 `Digest`（主题 / 开场 / 论文 / 结尾）；渲染层只信任结构，绝不信任 LLM 原文 |
@@ -216,10 +219,10 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
 
 | 部分 | 谁写的 | 说明 |
 |------|--------|------|
-| **主题** | 智能体 | 简短、信息明确、使用你的语言 |
+| **主题** | 模板 | 固定格式：`Zotero-arXiv-Daily … · <日期>` —— 稳定、可扫读 |
 | **开场** | 智能体 | 今天这批论文的整体情况 |
 | **卡片** | 智能体精选 + 排序 | 标题 → 摘要链接、来源徽章、相关度标签、**工作水平标签**、「推荐理由」、PDF/摘要按钮 |
-| **其他候选** | 流水线 | 过滤后未入选论文的紧凑列表（同样去重） |
+| **其他候选** | 智能体点评 + 流水线 | 未入选论文每篇也带同样的两个标签（独立一行），顶部是智能体对它们为何落选的整体点评 |
 | **结尾** | 智能体 | 收尾与展望 |
 | **页脚** | 模板 | 退订提示，本地化 |
 

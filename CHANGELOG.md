@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here.
 
+## [1.4.1] - 2026-08-03
+
+### Added
+- **Other-candidates badges + summary**: unpicked papers now render the same
+  Relevance + Work chips as picked cards (on their own line, never inline
+  with the title), plus an optional per-paper note. `submit_digest` gains
+  `others_summary` (the agent's overall comment on why the rest were
+  skipped) and `others[]` (reference work_scores for seriously-considered
+  rejects).
+- **Prompt-cache friendly harness**: the generator's system message now
+  carries an explicit `prompt_cache_breakpoint` so the stable prefix hits
+  the provider's prompt cache across turns; cached-token usage is logged
+  per run (OpenRouter/Anthropic/OpenAI compatible).
+- **On-disk full-text cache**: fetched paper full texts are cached in
+  `cache_dir/full_texts.json` (keyed by URL, bounded by
+  `full_text_cache_max`, default 200) so repeated runs stop re-downloading
+  and re-parsing the same PDFs.
+- **Fixed subject format**: the email subject is now a stable
+  `Zotero-arXiv-Daily … · <date>` (localised), not free-form agent prose.
+
+### Changed
+- **Test/formal separation**: manual workflow runs accept a `reset_history`
+  input that clears the sent-papers dedupe cache before running — so tests
+  see fresh papers instead of "everything already sent". Scheduled (formal)
+  runs keep daily dedupe untouched.
+- README (EN/ZH) updated; tests 188 passed, ruff clean.
+
 ## [1.4.0] - 2026-08-03
 
 ### Added

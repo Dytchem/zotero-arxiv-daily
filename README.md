@@ -12,7 +12,7 @@
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-182-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-188-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -104,7 +104,10 @@ arXiv/bioRxiv/medRxiv feeds          Your Zotero library
 | 🧠 **Single agent, full editorial control** | One agent loop reads your profile, inspects candidates with tools, and writes the whole email |
 | 🏆 **Expert-ranked picks** | The email's card order is the agent's editorial order — not a raw score sort |
 | ⭐ **Work-quality scoring** | Every card shows a **Work** badge (0–10): the agent's judgement of the paper's own merit — rigour, novelty, method soundness, provenance. Watery / low-quality work from weak institutions gets called out, even when embedding relevance is high |
+| 🧾 **Badged other-candidates** | Unpicked papers also get the same Relevance + Work chips (on their own line), plus an agent-written overall note on why the rest were skipped |
 | 🎯 **Taste-aware selection** | The research profile distills not just topics but the researcher's *taste* and quality bar; picks are matched to it, not just to keyword overlap |
+| ⚡ **Prompt-cache friendly** | The agent loop marks its stable system prompt with a prompt-cache breakpoint, so repeated turns hit the provider's cache (lower cost, lower latency) |
+| 🧱 **Fixed subject format** | The email subject is a stable `Zotero-arXiv-Daily … · <date>` — scannable, never free-form |
 | 🔧 **Real tool-use loop** | `inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest`, with a hard submit gate (≥3 inspections) |
 | ⚖️ **Generator + Evaluator** | An independent reviewer grades every draft (score, issues, approve/revise); `revise` feeds issues back, capped at `max_revisions` |
 | 📝 **Structured output** | The agent submits a typed `Digest` (subject / intro / papers / outro); the render layer trusts only the structure, never raw LLM text |
@@ -216,10 +219,10 @@ A rendered digest looks like this:
 
 | Part | Who writes it | Notes |
 |------|---------------|-------|
-| **Subject** | Agent | Short, informative, in your language |
+| **Subject** | Template | Fixed format: `Zotero-arXiv-Daily … · <date>` — stable and scannable |
 | **Intro** | Agent | Context for today's batch |
 | **Cards** | Agent picks + order | Title → abstract link, source badge, relevance chip, **work-quality chip**, "Why" reason, PDF/Abstract buttons |
-| **Other candidates** | Pipeline | Compact list of everything else that survived filtering (still deduped) |
+| **Other candidates** | Agent note + pipeline | Unpicked papers each with the same two chips (on their own line), headed by the agent's overall comment on why they were skipped |
 | **Outro** | Agent | Sign-off and look-ahead |
 | **Footer** | Template | Unsubscribe hint, localised |
 

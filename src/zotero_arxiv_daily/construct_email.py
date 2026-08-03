@@ -286,9 +286,16 @@ def _footer_html(language: str) -> str:
     return "To unsubscribe, remove your email in your GitHub Actions settings."
 
 
-def _others_block_html(papers: list[Paper], language: str = "English") -> str:
-    """Compact list of candidates the agent did not pick (bottom of the email)."""
+def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None) -> str:
+    """Compact list of candidates the agent did not pick (bottom of the email).
+
+    Each entry shows the same Relevance + Work badges as the picked cards
+    (on their own line, below the title — never inline with the title), plus
+    an optional per-paper note. An LLM-written overall summary is shown above
+    the list when provided.
+    """
     heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
+    others_map = others_map or {}
     rows = ""
     for i, p in enumerate(papers):
         title_text = _safe(_mathify(p.title))
@@ -298,14 +305,32 @@ def _others_block_html(papers: list[Paper], language: str = "English") -> str:
         if p.source:
             label = _SOURCE_LABELS.get(p.source, p.source)
             badge = f'<span style="background:#eef2ff;color:#4f46e5;font-size:10px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:8px;">{_safe(label)}</span>'
+        # Same two chips as the picked cards, on their own line below the title.
+        meta = others_map.get(i, {})
+        work_score = meta.get("work_score")
+        chips = _rate_html(p.score, language) + " " + _work_html(work_score, language)
+        note = _safe(_strip_markdown(meta.get("note", "")))
+        note_html = f'<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.45;">{note}</div>' if note else ""
         border = "border-bottom:1px solid #f3f4f6;" if i < len(papers) - 1 else ""
         rows += (
-            f'<div style="padding:8px 0;{border}font-size:13px;line-height:1.4;">'
-            f'{link}{badge}</div>'
+            f'<div style="padding:10px 0;{border}">'
+            f'<div style="font-size:13px;line-height:1.4;">{link}{badge}</div>'
+            f'<div style="margin-top:6px;">{chips}</div>'
+            f'{note_html}'
+            f'</div>'
+        )
+    summary_html = ""
+    if others_summary:
+        summary_html = (
+            f'<div style="font-size:13px;color:#374151;line-height:1.6;'
+            f'background:#f8fafc;border-left:4px solid #9ca3af;padding:8px 14px;'
+            f'border-radius:6px;margin-bottom:8px;">'
+            f'{_safe(_strip_markdown(others_summary))}</div>'
         )
     return (
         f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'
         f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">{heading}</div>'
+        f'{summary_html}'
         f'{rows}</div>'
     )
 
@@ -321,10 +346,11 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
 
     title = _safe(_strip_markdown(_mathify(digest.subject))) or "Daily paper digest"
     today = _today_str()
-    # Avoid a duplicated date: the agent's subject often already carries one
-    # (e.g. "... | 2026-08-02"). Only add the date to the summary line when
-    # the subject does not contain it.
-    subject_has_date = bool(re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}", title))
+    # Avoid a duplicated date: the fixed subject format always carries the
+    # date (e.g. "Zotero-arXiv-Daily 每日推荐 · 2026年8月3日" or
+    # "Zotero-arXiv-Daily Daily Digest · 2026-08-03"). Any 4-digit year in
+    # the title means the date is already there.
+    subject_has_date = bool(re.search(r"\d{4}", title))
     if language.lower().startswith("chinese"):
         summary = (f"{today} · " if not subject_has_date else "") + f"精选 {len(digest.papers)} 篇论文"
     else:
@@ -365,12 +391,27 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         cards = get_empty_html()
 
     # Remaining candidates (not picked by the agent) go at the bottom as a
-    # compact, no-frills list — still visible, but not editorialised.
+    # compact list — still visible, with the same Relevance + Work badges as
+    # the picked cards plus the agent's overall comment on them.
     others_html = ""
     if originals:
         others = [p for i, p in enumerate(originals) if i not in selected_indices]
         if others:
-            others_html = _others_block_html(others, language)
+            others_map: dict[int, dict] = {}
+            for entry in digest.others or []:
+                idx = int(entry.get("index", -1))
+                if idx < 0:
+                    continue
+                others_map[idx] = {
+                    "work_score": entry.get("work_score"),
+                    "note": entry.get("note", ""),
+                }
+            others_html = _others_block_html(
+                others,
+                language,
+                others_summary=digest.others_summary or "",
+                others_map=others_map,
+            )
 
     content = cards + others_html
     html = framework.replace("__TITLE__", title)

@@ -64,6 +64,7 @@ executor:
   keywords_exclude: null # Drop papers whose title/abstract contains ANY of these substrings (case-insensitive). Example: ["survey", "tutorial"]
   dedupe_history: true # Skip papers already emailed in previous runs (persisted in .cache/sent_papers.json). Disabled automatically in debug mode. Example: true
   cache_dir: .cache # Directory for run-state files (sent-paper history, embeddings cache). Example: .cache
+  full_text_cache_max: 200 # Max entries in the on-disk full-text cache (full_texts.json). Example: 200
   notifiers: ['email'] # Delivery channels for the digest: 'email', 'webhook' (or both). Example: ['email', 'webhook']
   # When notifiers includes 'webhook', configure it here (example for Telegram):
   # webhook:

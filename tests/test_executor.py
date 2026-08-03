@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, open_dict
 
 from zotero_arxiv_daily.executor import Executor, normalize_path_patterns
 from zotero_arxiv_daily.protocol import CorpusPaper
@@ -362,6 +362,54 @@ def test_populate_full_text_handles_failure(config, monkeypatch):
     assert paper.full_text is None
 
 
+def test_populate_full_text_hits_disk_cache(config, monkeypatch, tmp_path):
+    """Full text fetched once is cached on disk and reused on later runs
+    (no re-download/re-parse of the same PDFs)."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    executor = Executor(config)
+    with open_dict(config.executor):
+        config.executor.cache_dir = str(tmp_path)
+    executor = Executor(config)
+    fetched: list[str] = []
+
+    class FakeRetriever:
+        def fetch_full_text(self, paper):
+            fetched.append(paper.title)
+            return "FULL TEXT OF " + paper.title
+
+    executor.retrievers["arxiv"] = FakeRetriever()
+    paper = make_sample_paper(title="CacheMe", url="https://arxiv.org/abs/42", full_text=None)
+    executor._populate_full_text(paper)
+    assert fetched == ["CacheMe"]
+    assert paper.full_text == "FULL TEXT OF CacheMe"
+
+    # Second paper with the same URL: hits cache, no fetch.
+    paper2 = make_sample_paper(title="CacheMe", url="https://arxiv.org/abs/42", full_text=None)
+    executor._populate_full_text(paper2)
+    assert fetched == ["CacheMe"]  # no second fetch
+    assert paper2.full_text == "FULL TEXT OF CacheMe"
+
+
+def test_full_text_cache_bounded(config, tmp_path):
+    """The disk cache does not grow without limit."""
+    from zotero_arxiv_daily.executor import Executor
+
+    with open_dict(config.executor):
+        config.executor.cache_dir = str(tmp_path)
+        config.executor.full_text_cache_max = 5
+    executor = Executor(config)
+    for i in range(10):
+        executor._save_full_text(f"https://arxiv.org/abs/{i}", "x" * 100)
+    import json as _json
+
+    data = _json.loads((tmp_path / "full_texts.json").read_text())
+    assert len(data) <= 5
+    assert "https://arxiv.org/abs/9" in data
+    assert "https://arxiv.org/abs/0" not in data  # oldest evicted
+
+
 def test_generate_summaries_runs_all_papers(config, monkeypatch):
     """Legacy per-paper TLDR/affiliations path was removed in the harness refactor.
 
@@ -681,27 +729,20 @@ def test_run_single_source_failure_degrades(config, monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_digest_subject_single_arxiv():
+def test_digest_subject_fixed_english():
     from zotero_arxiv_daily.executor import Executor
 
     executor = Executor.__new__(Executor)
-    executor.config = OmegaConf.create({"executor": {"source": ["arxiv"]}})
+    executor.config = OmegaConf.create({"llm": {"language": "English"}, "executor": {"source": ["arxiv"]}})
     subject = executor._digest_subject()
-    assert subject.startswith("Daily arXiv ")
+    assert subject.startswith("Zotero-arXiv-Daily Daily Digest · ")
 
 
-def test_digest_subject_multi_source():
+def test_digest_subject_fixed_chinese():
     from zotero_arxiv_daily.executor import Executor
 
     executor = Executor.__new__(Executor)
-    executor.config = OmegaConf.create({"executor": {"source": ["arxiv", "biorxiv"]}})
+    executor.config = OmegaConf.create({"llm": {"language": "Chinese"}, "executor": {"source": []}})
     subject = executor._digest_subject()
-    assert subject.startswith("Daily Digest (arxiv, biorxiv) ")
-
-
-def test_digest_subject_empty_sources():
-    from zotero_arxiv_daily.executor import Executor
-
-    executor = Executor.__new__(Executor)
-    executor.config = OmegaConf.create({"executor": {"source": []}})
-    assert executor._digest_subject().startswith("Daily arXiv ")
+    assert subject.startswith("Zotero-arXiv-Daily 每日推荐 · ")
+    assert "年" in subject and "月" in subject and "日" in subject

@@ -360,8 +360,16 @@ class Executor:
         corpus = self.fetch_zotero_corpus()
         corpus = self.filter_corpus(corpus)
         if len(corpus) == 0:
+            # Fail loudly instead of silently skipping the email: an empty corpus
+            # almost always means broken Zotero credentials / filters, and the
+            # workflow failure notification is the only way the owner finds out.
             logger.error(f"No zotero papers found. Please check your zotero settings:\n{self.config.zotero}")
-            return
+            self._write_run_report(
+                corpus=0, candidates=0, ranked=0, elapsed=time.time() - t0, failures=[]
+            )
+            raise RuntimeError(
+                "No Zotero papers found — check ZOTERO_ID / ZOTERO_KEY and include_path filters."
+            )
 
         all_papers: list[Paper] = []
         source_failures: list[str] = []

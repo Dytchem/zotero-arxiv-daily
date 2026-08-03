@@ -76,7 +76,7 @@ def _bm25_pick(query: str, candidates: dict[str, str], k1: float = 1.5, b: float
     return best_name
 
 
-def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | None = None) -> dict[str,str]:
+def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | None = None) -> dict[str,str] | None:
     try:
         tar = tarfile.open(file_path)  # noqa: SIM115  (tar stays open while sub-files are read)
     except tarfile.ReadError:

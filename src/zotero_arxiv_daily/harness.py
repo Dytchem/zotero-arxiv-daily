@@ -377,15 +377,26 @@ class HarnessAgent:
                 "function": {
                     "name": "inspect_paper",
                     "description": (
-                        "Show the full content of one candidate by its index: authors, "
-                        "affiliations when available, abstract, and the paper's full "
-                        "text (fetched from the PDF on demand if not already loaded). "
-                        "Use this to actually READ a paper before judging it — judge "
-                        "the work's quality from its content, not just the title."
+                        "Read one candidate paper by its index: authors, affiliations "
+                        "when available, abstract, and a WINDOW of the full text "
+                        "(fetched from the PDF on demand). The full text is long — "
+                        "this returns one page (default 4000 chars from offset 0) with "
+                        "a progress note (e.g. 'chars 0-4000 of 18000'). If you need "
+                        "more, call inspect_paper again with a larger offset (e.g. "
+                        "offset=4000) to read the next page. Keep paging until you "
+                        "understand the method, experiments and results — reading only "
+                        "the first page is not enough to judge a paper's quality."
                     ),
                     "parameters": {
                         "type": "object",
-                        "properties": {"index": {"type": "integer"}},
+                        "properties": {
+                            "index": {"type": "integer"},
+                            "offset": {
+                                "type": "integer",
+                                "description": ("character offset into the full text to start reading from "
+                                                "(0 = start; 4000 = next page; ...)"),
+                            },
+                        },
                         "required": ["index"],
                     },
                 },
@@ -616,10 +627,15 @@ class HarnessAgent:
             "(embedding score 0-10 is a hint, not a command). Look at the whole "
             "list, not just the top of the first page.\n"
             "2. DEEP-DIVE: use inspect_paper on at least 3 papers you are seriously "
-            "considering. Read their abstracts and full text — inspect_paper shows "
-            "the full paper content (fetched from the PDF when needed), so actually "
-            "read it to judge the work, not just the title. Do not recommend a "
-            "paper you have not inspected.\n"
+            "considering. inspect_paper pages through the FULL TEXT (fetched from "
+            "the PDF on demand): each call returns one page (~4000 chars) plus a "
+            "progress note. READ MULTIPLE PAGES — keep calling inspect_paper with "
+            "increasing offset until you understand the methods, experiments and "
+            "results. Reading only the first page is NOT enough to judge a paper. "
+            "Your recommendation reason MUST be grounded in what you actually read "
+            "— cite concrete methods, evidence, or findings from the paper itself, "
+            "never a generic abstract paraphrase. Do not recommend a paper you have "
+            "not inspected.\n"
             "3. FOCUS: use search_candidates to zoom into a topic, and "
             "compare_papers to weigh two candidates against each other when in doubt.\n"
             "4. DECIDE — judge every candidate on the SAME two axes, and be strict:\n"
@@ -660,9 +676,12 @@ class HarnessAgent:
             "7. SUBMIT: call submit_digest with the finished subject, intro, per-paper "
             "recommendation reasons, and outro. Every paper MUST carry a work_score "
             "(0-10) reflecting your quality judgement — the reader sees it next to "
-            "the relevance badge, so make it honest and defensible. You may only "
-            "submit after you have inspected at least 3 papers with inspect_paper; "
-            "if you try to submit earlier you will be asked to keep working.\n"
+            "the relevance badge, so make it honest and defensible. The reason for "
+            "each pick must show you actually read the paper's full text (specific "
+            "methods, experiments, or results from the content), not just its "
+            "abstract. You may only submit after you have inspected at least 3 "
+            "papers with inspect_paper; if you try to submit earlier you will be "
+            "asked to keep working.\n"
             "8. OTHER CANDIDATES: the reader also sees the candidates you did not "
             "pick, and every single one of them gets the same Work badge — so you "
             "must provide a work_score for EVERY unpicked candidate in the others "
@@ -776,9 +795,10 @@ class HarnessAgent:
                     })
                 elif name == "inspect_paper":
                     idx = int(args.get("index", -1))
+                    offset = int(args.get("offset", 0) or 0)
                     if 0 <= idx < len(candidates):
                         inspected.add(idx)
-                    result = self._describe_paper(candidates, idx)
+                    result = self._describe_paper(candidates, idx, offset=offset)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -857,7 +877,11 @@ class HarnessAgent:
             "render as n/a and look sloppy — flag gaps.\n"
             "- Taste fit: do the picks match the profile's taste line (depth, style, "
             "provenance expectations), not just topic keywords?\n"
-            "- Specificity: is each reason concrete and tied to the paper, or a generic paraphrase?\n"
+            "- Specificity (critical): is each reason grounded in the paper's FULL "
+            "TEXT — concrete methods, experiments, or results — or just a generic "
+            "abstract paraphrase? Reasons that only restate the abstract (or are so "
+            "generic they could apply to any paper) are a high-severity issue: the "
+            "generator must actually read the paper, not skim metadata.\n"
             "- Coverage: are any highly-relevant candidates wrongly ignored?\n"
             "- Language/format: consistent language, no index-number references, sane length.\n\n"
             "Respond with STRICT JSON only, no markdown, in this exact shape:\n"
@@ -927,7 +951,13 @@ class HarnessAgent:
             )
         return "\n".join(lines) if lines else f"Index out of range (0..{len(candidates)-1})."
 
-    def _describe_paper(self, candidates: list[Paper], index: int) -> str:
+    def _describe_paper(self, candidates: list[Paper], index: int, offset: int = 0) -> str:
+        """Read one page of a candidate's full text (progressive disclosure).
+
+        Returns metadata (authors, affiliations, abstract, URL) plus a window of
+        the full text starting at ``offset`` (default page size 4000 chars) and
+        a progress note so the agent can keep paging with a larger offset.
+        """
         if not (0 <= index < len(candidates)):
             return f"Index out of range (0..{len(candidates)-1})."
         p = candidates[index]
@@ -942,16 +972,28 @@ class HarnessAgent:
             except Exception as exc:
                 logger.warning(f"On-demand full-text fetch failed for {p.title}: {exc}")
         body = p.full_text or p.abstract or ""
+        total = len(body)
+        page_size = 4000
+        offset = max(0, int(offset or 0))
+        window = body[offset: offset + page_size]
+        end = min(offset + page_size, total)
         affil = ""
         if getattr(p, "affiliations", None):
             affil = f"Affiliations: {', '.join(p.affiliations[:6])}\n"
+        progress = f"chars {offset}-{end} of {total}"
+        more = (
+            f" | MORE available: call inspect_paper(index={index}, offset={end}) "
+            "for the next page"
+            if end < total
+            else " | end of paper"
+        )
         return (
             f"[{index}] {p.title}\n"
             f"Authors: {_authors_line(p)}\n"
             f"{affil}"
             f"URL: {p.url}\n"
             f"Full abstract:\n{p.abstract}\n"
-            f"Full-text preview:\n{_truncate(body, 4000)}"
+            f"Full-text ({progress}{more}):\n{window}"
         )
 
     def _search_candidates(self, candidates: list[Paper], query: str) -> str:

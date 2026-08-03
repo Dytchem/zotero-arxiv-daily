@@ -25,8 +25,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 import random
 import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -267,15 +270,124 @@ class Executor:
     # ------------------------------------------------------------------
 
     def _agent_digest(self, candidates: list[Paper], corpus: list[CorpusPaper]):
-        """Invoke the HarnessAgent. Returns a Digest (may be a fallback)."""
-        # Give the agent an on-demand full-text fetcher so it can actually read
-        # the PDF content of any candidate it inspects, not just metadata.
+        """Invoke the digest agent. Returns a Digest (may be a fallback).
+
+        Engine selection: ``llm.harness.engine`` — "pi" (default) runs the Pi
+        coding agent (Node, agent/run.mjs) as the editorial agent, falling back
+        to the Python HarnessAgent when the Pi engine is unavailable or fails;
+        "python" skips straight to the Python harness. Either way the pipeline
+        degrades to a plain embedding-order digest before giving up.
+        """
+        engine = (self.config.llm.get("harness") or {}).get("engine", "pi")
+        if engine == "pi":
+            digest = self._agent_digest_pi(candidates, corpus)
+            if digest is not None:
+                return digest
+            logger.warning("Pi agent engine failed; falling back to Python harness")
         agent = HarnessAgent(self.config, full_text_fetcher=self._populate_full_text)
         digest = agent.generate(candidates, corpus)
         if digest is None:
             max_n = int(self.config.executor.get("max_paper_num", 100))
             language = (self.config.llm or {}).get("language", "English")
             digest = HarnessAgent.fallback_digest(candidates, max_n, language=language)
+        return digest
+
+    def _agent_digest_pi(self, candidates: list[Paper], corpus: list[CorpusPaper]):
+        """Run the Pi coding agent (agent/run.mjs) and return its Digest.
+
+        The candidates + research profile are serialized to a JSON file, the
+        Node agent inspects them with its own tools (ROLE.md governs), and its
+        ``submit_digest`` tool writes the digest JSON that we read back. Any
+        failure (missing node, missing key, timeout, malformed digest) returns
+        None so the caller falls back to the Python harness.
+        """
+        node = shutil.which("node")
+        run_mjs = Path(__file__).resolve().parent.parent.parent / "agent" / "run.mjs"
+        if node is None or not run_mjs.exists():
+            logger.warning("Pi engine unavailable (node or agent/run.mjs missing)")
+            return None
+        llm_cfg = self.config.llm or {}
+        api_key = (llm_cfg.get("api") or {}).get("key")
+        api_base = (llm_cfg.get("api") or {}).get("base_url")
+        if not api_key:
+            logger.warning("Pi engine unavailable (no llm.api.key)")
+            return None
+
+        # Research profile is built the same way as the Python harness (cached).
+        agent = HarnessAgent(self.config, full_text_fetcher=self._populate_full_text)
+        profile = agent.build_profile(corpus)
+        if profile is None:
+            return None
+
+        harness_cfg = llm_cfg.get("harness") or {}
+        input_payload = {
+            "model": agent.model,
+            "language": agent.language,
+            "min_inspections": int(harness_cfg.get("min_inspections", 3)),
+            "max_steps": int(harness_cfg.get("max_steps", 12)),
+            "profile": {
+                "topics": profile.topics,
+                "keywords": profile.keywords,
+                "methods": profile.methods,
+                "summary": profile.summary,
+                "taste": profile.taste,
+            },
+            "candidates": [
+                {
+                    "index": i,
+                    "title": p.title,
+                    "authors": p.authors,
+                    "abstract": p.abstract or "",
+                    "url": p.url,
+                    "pdf_url": p.pdf_url,
+                    "score": p.score,
+                    "source": p.source,
+                    "full_text": p.full_text or "",
+                }
+                for i, p in enumerate(candidates)
+            ],
+        }
+        cache_dir = Path(self.config.executor.get("cache_dir") or ".cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        in_path = cache_dir / "pi_input.json"
+        out_path = cache_dir / "pi_digest.json"
+        try:
+            in_path.write_text(json.dumps(input_payload, ensure_ascii=False), "utf8")
+            if out_path.exists():
+                out_path.unlink()
+            env = dict(os.environ)
+            env["OPENAI_API_KEY"] = api_key
+            if api_base:
+                env["OPENAI_API_BASE"] = api_base
+            timeout = int(harness_cfg.get("pi_timeout", 900))
+            proc = subprocess.run(
+                [node, str(run_mjs), "--input", str(in_path), "--output", str(out_path)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if proc.returncode != 0:
+                logger.warning(f"Pi agent exited {proc.returncode}: {proc.stderr[-500:]}")
+                return None
+            if not out_path.exists():
+                logger.warning("Pi agent finished without writing a digest")
+                return None
+            data = json.loads(out_path.read_text("utf8"))
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Pi agent timed out after {timeout}s")
+            return None
+        except Exception as exc:
+            logger.warning(f"Pi agent failed: {exc}")
+            return None
+        digest = HarnessAgent._digest_from_args(data, len(candidates))
+        if not digest.papers and not digest.intro:
+            logger.warning("Pi agent returned an empty digest")
+            return None
+        logger.info(
+            f"Pi agent digest: {len(digest.papers)} recommended, "
+            f"{len(digest.others)} others scored"
+        )
         return digest
 
     def _populate_full_text(self, paper: Paper) -> None:

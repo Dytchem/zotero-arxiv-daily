@@ -33,13 +33,15 @@ llm:
     model: ??? # The model for the harness agent (e.g. gpt-5.6-luna on OpenRouter)
   language: English # Preferred language for the digest (intro / reasons / outro). Example: English
   harness:
-    enabled: true # Single HarnessAgent: reads your Zotero profile + candidates and writes the whole digest. Example: true
+    enabled: true # Single agent (Pi engine by default): reads your Zotero profile + candidates and writes the whole digest. Example: true
+    engine: pi # Agent engine: "pi" = Pi coding agent (Node, agent/run.mjs + ROLE.md, falls back to Python harness on failure); "python" = legacy Python HarnessAgent. Example: pi
     top_k: 100 # How many embedding-ranked candidates to show the agent. Example: 100
     full_text_budget: 10 # How many top candidates to prefetch full text for (agent can inspect deeper). Example: 10
     max_steps: 12 # Max agent loop iterations (tools + final digest). Example: 12
     min_inspections: 3 # Submit gate: papers the agent must inspect with inspect_paper before it may submit. Example: 3
     max_revisions: 2 # Evaluator rounds: how many times a 'revise' verdict re-runs the generator. Example: 2
     evaluator_enabled: true # Independent fresh-context reviewer grades the draft (approve/revise). Example: true
+    pi_timeout: 900 # Seconds before the Pi agent subprocess is killed (fallback to Python harness). Example: 900
 
 reranker:
   local:

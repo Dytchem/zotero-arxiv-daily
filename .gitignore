@@ -22,3 +22,9 @@ htmlcov/
 
 # coverage artifacts
 .coverage
+
+# Pi agent (Node)
+agent/node_modules/
+agent/models-store.json
+.cache/pi_input.json
+.cache/pi_digest.json

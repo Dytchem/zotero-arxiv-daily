@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.0] - 2026-08-04
+
+### Added
+- **Pi agent engine** (`agent/`): the digest is now produced by the Pi coding
+  agent (`@earendil-works/pi-coding-agent`) driven by `agent/ROLE.md` — the
+  repository's own role definition (SURVEY → DEEP-DIVE → FOCUS → DECIDE →
+  ORDER → SUBMIT gates). Python keeps the data pipeline; the agent owns every
+  editorial decision.
+- `agent/run.mjs`: Node entry point — reads candidates + research profile as
+  JSON, runs the Pi agent with custom tools (`inspect_candidates` /
+  `inspect_paper` with offset pagination / `search_candidates` /
+  `compare_papers` / `submit_digest`), writes the digest JSON the Python side
+  reads back.
+- `agent/models.json`: custom provider (baseUrl → OpenRouter, apiKey from
+  `$OPENAI_API_KEY` env interpolation) — the repo has no
+  `OPENROUTER_API_KEY`, so the built-in openrouter provider is unusable.
+- `llm.harness.engine` config: `pi` (default) or `python` (legacy harness).
+  Pi failures (missing node, timeout, malformed digest) degrade to the Python
+  harness, then to the embedding-order digest — the daily email always goes
+  out.
+- Workflow now installs Node deps (`cd agent && npm ci`) before running.
+
 ## [1.4.2] - 2026-08-04
 
 ### Fixed

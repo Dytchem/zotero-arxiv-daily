@@ -12,7 +12,7 @@
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-188-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-191-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -257,20 +257,23 @@ agent could not judge), plus an agent-written note on why they were skipped.
          │                 keywords / sent-history)          │
          │                       │                           │
          │                       ▼                           │
-         │            ┌──────────────────────┐               │
-         │            │     HarnessAgent      │◄─────────────┘
-         │            │  inspect_candidates   │   candidate list
-         │            │  inspect_paper        │   + embedding scores
-         │            │  search_candidates    │
-         │            │  compare_papers       │
-         │            │  submit_digest        │
-         │            └──────────┬───────────┘
-         │                       │  draft Digest
+         │            ┌──────────────────────────┐            │
+         │            │   Pi agent engine        │◄───────────┘
+         │            │  (agent/run.mjs, Node)   │   candidate list
+         │            │  ROLE.md = system prompt │   + embedding scores
+         │            │  inspect_candidates      │
+         │            │  inspect_paper (paged)   │
+         │            │  search_candidates       │
+         │            │  compare_papers          │
+         │            │  submit_digest           │
+         │            └──────────┬───────────────┘
+         │                       │  digest JSON
          │                       ▼
          │            ┌──────────────────────┐
-         │            │   EVALUATOR          │  fresh context, no tools
-         │            │  score + issues +    │  approve → done
-         │            │  verdict (revise?)   │  revise → feedback loop
+         │            │   (optional) legacy  │  Python HarnessAgent:
+         │            │   EVALUATOR          │  generator/evaluator loop,
+         │            │                      │  used when engine=python
+         │            │                      │  or Pi fails
          │            └──────────┬───────────┘
          │                       │  final Digest (typed JSON)
          ▼                       ▼
@@ -293,12 +296,18 @@ agent could not judge), plus an agent-written note on why they were skipped.
 ```
 src/zotero_arxiv_daily/
 ├── protocol.py          # Data classes: Paper, CorpusPaper, RawPaperItem
-├── harness.py           # HarnessAgent: generator loop + tools + evaluator
+├── harness.py           # Legacy Python HarnessAgent (engine=python / Pi fallback)
 ├── construct_email.py   # Safe HTML renderer: Digest → email HTML
 ├── executor.py          # Orchestrator: fetch → rerank → filter → agent → deliver
 ├── retriever/           # arXiv, bioRxiv, medRxiv retrievers
 ├── reranker/            # Hybrid reranker (BM25 + embeddings, local or API)
 └── notifier.py          # Delivery plugins (email, webhook)
+
+agent/                   # Pi agent engine (Node)
+├── ROLE.md              # ★ the repo's innovation: agent role definition (SURVEY→DEEP-DIVE→FOCUS→DECIDE→ORDER→SUBMIT)
+├── run.mjs              # Entry point: candidates JSON → Pi agent → digest JSON
+├── models.json          # Custom provider (OpenRouter via $OPENAI_API_KEY)
+└── package.json         # @earendil-works/pi-coding-agent + pi-ai
 
 config/
 ├── base.yaml            # Full config schema (defaults + documentation)
@@ -323,7 +332,7 @@ docs/HARNESS.md          # Generator/evaluator design document
 | `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
 | `llm.generation_kwargs` | `model`, `max_tokens` | Agent model + generation settings |
 | `llm.language` | `English` / `Chinese` | Digest language (labels + agent output) |
-| `llm.harness` | `enabled`, `top_k`, `full_text_budget`, `max_steps`, `min_inspections`, `max_revisions`, `evaluator_enabled` | Agent loop tuning |
+| `llm.harness` | `enabled`, `engine` (`pi`/`python`), `top_k`, `full_text_budget`, `max_steps`, `min_inspections`, `max_revisions`, `evaluator_enabled`, `pi_timeout` | Agent engine + loop tuning; Pi failures fall back to the Python harness, then to embedding order |
 | `reranker` | `local` / `api` | Embedding backend (model, batch_size, cache_dir) |
 | `executor` | `rerank_alpha` | Hybrid weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only |
 | `executor` | `min_score`, `keywords_include`, `keywords_exclude` | Deterministic pre-agent filters |

@@ -36,6 +36,7 @@ def _base_config():
                 "llm.api.key=sk-fake",
                 "llm.api.base_url=http://localhost:30000/v1",
                 "llm.generation_kwargs.model=gpt-4o-mini",
+                "llm.harness.engine=python", # tests exercise the deterministic Python harness (mock client); Pi engine is integration-tested in CI
                 "reranker.api.key=sk-fake",
                 "reranker.api.base_url=http://localhost:30000/v1",
                 "reranker.api.model=text-embedding-3-large",

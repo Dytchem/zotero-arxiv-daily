@@ -25,6 +25,15 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Setup node + install Pi agent
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+        working-directory: agent
+
       - name: Cache corpus embeddings
         uses: actions/cache@v4
         with:

@@ -12,7 +12,7 @@
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-188-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-191-brightgreen?style=flat-square" alt="Tests">
 </p>
 
 <p align="center">
@@ -249,20 +249,22 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
          │                 关键词 / 已发送去重）               │
          │                       │                           │
          │                       ▼                           │
-         │            ┌──────────────────────┐               │
-         │            │     HarnessAgent      │◄─────────────┘
-         │            │  inspect_candidates   │   候选列表
-         │            │  inspect_paper        │   + 向量分数
-         │            │  search_candidates    │
-         │            │  compare_papers       │
-         │            │  submit_digest        │
-         │            └──────────┬───────────┘
-         │                       │  草稿 Digest
+         │            ┌──────────────────────────┐            │
+         │            │   Pi 智能体引擎            │◄───────────┘
+         │            │  (agent/run.mjs, Node)   │   候选列表
+         │            │  ROLE.md = 系统提示词      │   + 向量分数
+         │            │  inspect_candidates       │
+         │            │  inspect_paper（分页）     │
+         │            │  search_candidates        │
+         │            │  compare_papers           │
+         │            │  submit_digest            │
+         │            └──────────┬───────────────┘
+         │                       │  digest JSON
          │                       ▼
          │            ┌──────────────────────┐
-         │            │   评审器 EVALUATOR    │  fresh context、无工具
-         │            │  分数 + 问题 + 判定    │  approve → 完成
-         │            │  (revise?)           │  revise → 反馈修订循环
+         │            │   （可选）旧版引擎     │  Python HarnessAgent：
+         │            │   生成器/评审器循环    │  用于 engine=python
+         │            │                      │  或 Pi 失败时回退
          │            └──────────┬───────────┘
          │                       │  最终 Digest（结构化 JSON）
          ▼                       ▼
@@ -276,7 +278,7 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
             └──────────────────┘
 ```
 
-**为什么需要两个智能体？** Anthropic 的研究表明，生成器/评审器模式对口位型任务的质量提升最大。生成器负责探索和撰写；独立的评审器用全新上下文、不带工具地给草稿打分，并驱动改进循环 —— 完整设计见 [`docs/HARNESS.md`](docs/HARNESS.md)。
+**为什么用智能体引擎？** 邮件里每一句编辑决定——推荐哪些论文、每篇理由怎么写、邮件怎么组织——都由智能体负责：默认用 Pi 编码智能体（`agent/run.mjs` + `agent/ROLE.md`，仓库自身的创新点：把通用智能体框架变成一位挑剔的研究馆员）；Pi 不可用或失败时回退到 Python HarnessAgent（生成器/评审器双智能体循环），再失败则退化为向量排序摘要——日常邮件一定能发出去。
 
 ---
 
@@ -285,12 +287,18 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
 ```
 src/zotero_arxiv_daily/
 ├── protocol.py          # 数据类：Paper、CorpusPaper、RawPaperItem
-├── harness.py           # HarnessAgent：生成器循环 + 工具 + 评审器
+├── harness.py           # 旧版 Python HarnessAgent（engine=python / Pi 回退）
 ├── construct_email.py   # 安全 HTML 渲染：Digest → 邮件 HTML
 ├── executor.py          # 编排器：抓取 → 重排 → 过滤 → 智能体 → 发送
 ├── retriever/           # arXiv、bioRxiv、medRxiv 抓取器
 ├── reranker/            # 混合重排（BM25 + 向量，本地或 API）
 └── notifier.py          # 发送插件（邮件、Webhook）
+
+agent/                   # Pi 智能体引擎（Node）
+├── ROLE.md              # ★ 仓库创新点：智能体角色定义（SURVEY→DEEP-DIVE→FOCUS→DECIDE→ORDER→SUBMIT）
+├── run.mjs              # 入口：候选 JSON → Pi 智能体 → digest JSON
+├── models.json          # 自定义提供商（经 $OPENAI_API_KEY 走 OpenRouter）
+└── package.json         # @earendil-works/pi-coding-agent + pi-ai
 
 config/
 ├── base.yaml            # 完整配置模板（默认值 + 文档）
@@ -315,7 +323,7 @@ docs/HARNESS.md          # 生成器/评审器设计文档
 | `llm.api` | `key`、`base_url` | LLM 提供商（推荐 OpenRouter） |
 | `llm.generation_kwargs` | `model`、`max_tokens` | 智能体模型 + 生成参数 |
 | `llm.language` | `Chinese` / `English` | 邮件语言（界面标签 + 智能体输出） |
-| `llm.harness` | `enabled`、`top_k`、`full_text_budget`、`max_steps`、`min_inspections`、`max_revisions`、`evaluator_enabled` | 智能体循环调优 |
+| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`min_inspections`、`max_revisions`、`evaluator_enabled`、`pi_timeout` | 智能体引擎 + 循环调优；Pi 失败时回退 Python harness，再退化向量排序 |
 | `reranker` | `local` / `api` | 向量后端（模型、batch_size、cache_dir） |
 | `executor` | `rerank_alpha` | 混合权重：1.0 = 纯向量，0.0 = 纯 BM25，null = 仅向量 |
 | `executor` | `min_score`、`keywords_include`、`keywords_exclude` | 智能体前的确定性过滤 |

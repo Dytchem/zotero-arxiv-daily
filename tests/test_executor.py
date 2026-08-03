@@ -746,3 +746,48 @@ def test_digest_subject_fixed_chinese():
     subject = executor._digest_subject()
     assert subject.startswith("Zotero-arXiv-Daily 每日推荐 · ")
     assert "年" in subject and "月" in subject and "日" in subject
+
+
+# ---------------------------------------------------------------------------
+# Pi agent engine
+# ---------------------------------------------------------------------------
+
+
+def test_agent_digest_pi_falls_back_when_node_missing(config, monkeypatch):
+    """engine=pi but node/agent/run.mjs unavailable → Python harness fallback."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest
+
+    # Pi engine configured, but the node runtime is missing.
+    with open_dict(config.llm.harness):
+        config.llm.harness.engine = "pi"
+        config.llm.harness.enabled = False  # harness disabled → fallback digest
+    monkeypatch.setattr("zotero_arxiv_daily.executor.shutil.which", lambda name: None)
+
+    executor = Executor(config)
+    papers = [make_sample_paper(title=f"Pi Fallback {i}") for i in range(3)]
+    digest = executor._agent_digest(papers, [])
+    assert isinstance(digest, Digest)
+    assert len(digest.papers) == 3
+
+
+def test_agent_digest_pi_returns_none_when_node_fails(config, monkeypatch):
+    """engine=pi, node present, but agent/run.mjs missing → None → fallback."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest
+
+    with open_dict(config.llm.harness):
+        config.llm.harness.engine = "pi"
+        config.llm.harness.enabled = False
+    monkeypatch.setattr("zotero_arxiv_daily.executor.shutil.which", lambda name: "/usr/bin/node")
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.Path.exists", lambda self: False
+    )
+
+    executor = Executor(config)
+    papers = [make_sample_paper(title=f"Pi None {i}") for i in range(2)]
+    digest = executor._agent_digest(papers, [])
+    assert isinstance(digest, Digest)  # fell back to fallback_digest path
+    assert len(digest.papers) == 2

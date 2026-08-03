@@ -8,7 +8,7 @@ from zotero_arxiv_daily.construct_email import (
     render_email,
     render_fallback,
 )
-from zotero_arxiv_daily.harness import Digest, DigestPaper
+from zotero_arxiv_daily.harness import Digest, DigestPaper, _today_str
 
 
 def _paper(index=0, **kw):
@@ -106,7 +106,8 @@ def test_render_email_date_not_duplicated_when_subject_has_it():
 def test_render_email_date_added_when_subject_lacks_it():
     digest = Digest(subject="Quantum digest", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
     html = render_email(digest, originals=[_paper(0)], language="Chinese")
-    assert "2026-08-02" in html  # date appears in the summary line
+    today = _today_str()
+    assert today in html  # date appears in the summary line
     assert "精选 1 篇论文" in html
 
 

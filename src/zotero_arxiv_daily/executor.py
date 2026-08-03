@@ -268,7 +268,9 @@ class Executor:
 
     def _agent_digest(self, candidates: list[Paper], corpus: list[CorpusPaper]):
         """Invoke the HarnessAgent. Returns a Digest (may be a fallback)."""
-        agent = HarnessAgent(self.config)
+        # Give the agent an on-demand full-text fetcher so it can actually read
+        # the PDF content of any candidate it inspects, not just metadata.
+        agent = HarnessAgent(self.config, full_text_fetcher=self._populate_full_text)
         digest = agent.generate(candidates, corpus)
         if digest is None:
             max_n = int(self.config.executor.get("max_paper_num", 100))

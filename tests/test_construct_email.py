@@ -49,6 +49,37 @@ def test_render_email_shows_relevance_score():
     assert "Relevance: n/a" not in html
 
 
+def test_render_email_shows_work_score_badge():
+    """The Work badge (LLM quality judgement) sits next to Relevance."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r", work_score=8.4)],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0, score=7.5)])
+    assert "Relevance: 7.5" in html
+    assert "Work: 8.4" in html
+
+
+def test_render_email_work_score_chinese_label():
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r", work_score=6.2)],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "工作水平: 6.2" in html
+    assert "相关度" in html
+
+
+def test_render_email_work_score_none_hides_badge():
+    """No LLM judgement (fallback path) -> no Work badge at all, not 'n/a'."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(digest, originals=[_paper(0, score=7.5)])
+    assert "Relevance: 7.5" in html
+    assert "Work:" not in html
+
+
 def test_render_email_relevance_none_is_defensive():
     digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
     html = render_email(digest, originals=[_paper(0, score=None)])

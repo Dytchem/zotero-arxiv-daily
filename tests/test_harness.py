@@ -1,5 +1,6 @@
 """Tests for the single HarnessAgent (agent loop + tools + Digest output)."""
 
+import json
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -140,7 +141,9 @@ def test_profile_prompt_truncates_long_abstracts():
         title="T", abstract="x" * 5000, added_date=datetime(2026, 1, 1), paths=["a"]
     )]
     prompt = _profile_prompt(corpus, "English")
-    assert len(prompt) < 1000
+    # The 5000-char abstract must be truncated, not inlined wholesale.
+    assert "x" * 5000 not in prompt
+    assert len(prompt) < 2000
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +474,117 @@ def test_digest_from_args_ignores_bad_indices():
     )
     assert d.papers[0].index == -1
     assert d.papers[0].reason == "r"
+
+
+def test_digest_from_args_parses_work_score():
+    d = HarnessAgent._digest_from_args(
+        {"subject": "s", "intro": "", "papers": [
+            {"index": 0, "reason": "r", "work_score": 8.4},
+            {"index": 1, "reason": "r2", "work_score": "3"},
+            {"index": 2, "reason": "r3", "work_score": None},
+            {"index": 3, "reason": "r4"},
+        ], "outro": ""},
+        5,
+    )
+    assert d.papers[0].work_score == 8.4
+    assert d.papers[1].work_score == 3.0
+    assert d.papers[2].work_score is None
+    assert d.papers[3].work_score is None
+
+
+def test_digest_from_args_clamps_work_score():
+    d = HarnessAgent._digest_from_args(
+        {"subject": "s", "intro": "", "papers": [
+            {"index": 0, "reason": "r", "work_score": 99},
+            {"index": 1, "reason": "r2", "work_score": -5},
+        ], "outro": ""},
+        5,
+    )
+    assert d.papers[0].work_score == 10.0
+    assert d.papers[1].work_score == 0.0
+
+
+def test_inspect_paper_fetches_full_text_on_demand(config, tmp_path, monkeypatch):
+    """The agent can read the full PDF text of any candidate on demand — the
+    injected fetcher is called when the paper has no full text yet."""
+    harness, _ = _make_harness(config, tmp_path, monkeypatch)
+    fetched = []
+
+    def fetcher(paper):
+        fetched.append(paper.title)
+        return "FULL TEXT CONTENT of " + paper.title
+
+    harness.full_text_fetcher = fetcher
+    papers = [make_sample_paper(title="NeedsFetch", url="https://arxiv.org/abs/1", full_text=None)]
+    out = harness._describe_paper(papers, 0)
+    assert fetched == ["NeedsFetch"]
+    assert "FULL TEXT CONTENT of NeedsFetch" in out
+
+
+def test_inspect_paper_reuses_existing_full_text(config, tmp_path, monkeypatch):
+    """No redundant fetch when full text is already loaded."""
+    harness, _ = _make_harness(config, tmp_path, monkeypatch)
+    calls = []
+
+    def fetcher(paper):
+        calls.append(paper.title)
+        return "x"
+
+    harness.full_text_fetcher = fetcher
+    papers = [make_sample_paper(title="Loaded", full_text="ALREADY THERE")]
+    out = harness._describe_paper(papers, 0)
+    assert calls == []
+    assert "ALREADY THERE" in out
+
+
+def test_inspect_paper_fetch_failure_degrades_to_abstract(config, tmp_path, monkeypatch):
+    harness, _ = _make_harness(config, tmp_path, monkeypatch)
+
+    def fetcher(paper):
+        raise RuntimeError("boom")
+
+    harness.full_text_fetcher = fetcher
+    papers = [make_sample_paper(title="T", abstract="ABS ONLY")]
+    out = harness._describe_paper(papers, 0)
+    assert "ABS ONLY" in out
+
+
+def test_profile_prompt_includes_taste():
+    corpus = [CorpusPaper(
+        title="T", abstract="a", added_date=datetime(2026, 1, 1), paths=["p"]
+    )]
+    prompt = _profile_prompt(corpus, "English")
+    assert '"taste"' in prompt
+
+
+def test_build_profile_parses_taste(config, tmp_path, monkeypatch):
+    harness, _ = _make_harness(
+        config, tmp_path, monkeypatch,
+        profile_reply=(
+            '{"topics": ["LLM"], "keywords": ["rerank"], "methods": ["transformer"], '
+            '"summary": "sum", "taste": "prefers rigorous, well-sourced work"}'
+        ),
+    )
+    profile = harness.build_profile(make_sample_corpus(2))
+    assert profile is not None
+    assert profile.taste == "prefers rigorous, well-sourced work"
+
+
+def test_profile_cache_schema_bump_invalidates_old_cache(config, tmp_path, monkeypatch):
+    """Old caches (written before the taste field, schema 1) are invalidated."""
+    harness, calls = _make_harness(config, tmp_path, monkeypatch)
+    corpus = make_sample_corpus(2)
+    harness.build_profile(corpus)
+    # Rewrite the cache as an old schema-1 cache, then rebuild: the cached
+    # profile must be rejected and the LLM called again.
+    cache = harness._profile_cache_path()
+    data = json.loads(cache.read_text())
+    data.pop("schema")
+    cache.write_text(json.dumps(data))
+    profile = harness.build_profile(corpus)
+    assert profile is not None
+    profile_calls = [c for c in calls if "Distill this library" in str(c)]
+    assert len(profile_calls) == 2
 
 
 def test_fallback_digest_uses_embedding_order(config, tmp_path):

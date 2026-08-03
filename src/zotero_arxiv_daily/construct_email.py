@@ -165,7 +165,36 @@ def _rate_html(score: float | None, language: str = "English") -> str:
     )
 
 
-def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None, language: str = "English") -> str:
+def _work_html(score: float | None, language: str = "English") -> str:
+    """Work-quality badge (LLM judgement of the paper's own merit) shown next
+    to the relevance badge. Colored by tier so watery papers are visible at a
+    glance: green >= 7, amber 5-7, red < 5. Missing score renders as n/a."""
+    label = "工作水平" if language.lower().startswith("chinese") else "Work"
+    if score is None:
+        # No LLM quality judgement (e.g. embedding-order fallback): hide the
+        # badge rather than showing a meaningless n/a next to Relevance.
+        return ""
+    try:
+        rate = round(float(score), 1)
+    except (TypeError, ValueError):
+        rate = "n/a"
+    if isinstance(rate, float):
+        if rate >= 7.0:
+            bg, fg = "#ecfdf5", "#047857"
+        elif rate >= 5.0:
+            bg, fg = "#fffbeb", "#b45309"
+        else:
+            bg, fg = "#fef2f2", "#b91c1c"
+    else:
+        bg, fg = "#f3f4f6", "#6b7280"
+    return (
+        f'<span style="display:inline-block;background:{bg};color:{fg};'
+        f'font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;">'
+        f'{label}: {rate}</span>'
+    )
+
+
+def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None, work_score=None, language: str = "English") -> str:
     title_text = _strip_markdown(_mathify(title))
     title_html = title_text
     clean_url = _clean_link(url)
@@ -226,7 +255,7 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
       {badge_html}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
       <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>
-      <div style="margin-top:10px;">{_rate_html(score, language)}</div>
+      <div style="margin-top:10px;">{_rate_html(score, language)} {_work_html(work_score, language)}</div>
       {note_html}
       <div style="margin-top:14px;">{buttons}</div>
     </div>
@@ -328,6 +357,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 pdf_url=(paper.pdf_url if paper else None),
                 source=(paper.source if paper else None),
                 score=(paper.score if paper else None),
+                work_score=dp.work_score,
                 language=language,
             )
             selected_indices.add(dp.index)

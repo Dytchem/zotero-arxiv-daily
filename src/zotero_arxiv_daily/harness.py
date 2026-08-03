@@ -51,6 +51,7 @@ class DigestPaper:
     index: int  # position in the candidate list passed to the agent
     reason: str  # the agent's why-this-paper rationale (shown in the email)
     tldr: str = ""  # optional one-line takeaway
+    work_score: float | None = None  # LLM quality judgement 0-10 (rigour / novelty / provenance)
 
 
 @dataclass
@@ -66,12 +67,13 @@ class Digest:
 
 @dataclass
 class ResearchProfile:
-    """LLM-distilled description of the user's research interests."""
+    """LLM-distilled description of the user's research interests and taste."""
 
     topics: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
     summary: str = ""
+    taste: str = ""  # distilled research taste: rigour bar, venue/provenance expectations, style
 
 
 @dataclass
@@ -92,6 +94,17 @@ def _truncate(text: str, limit: int) -> str:
     if text is None:
         return ""
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _parse_work_score(value) -> float | None:
+    """Parse a work_score from LLM args; None when absent/invalid."""
+    if value is None:
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(score, 0.0), 10.0)
 
 
 def _today_str() -> str:
@@ -149,8 +162,14 @@ def _profile_prompt(corpus: list[CorpusPaper], language: str) -> str:
         f"Distill this library into a research profile. Respond with STRICT JSON only, "
         f"no markdown, in this exact shape:\n"
         f'{{"topics": ["...", "..."], "keywords": ["...", "..."], '
-        f'"methods": ["...", "..."], "summary": "one paragraph describing research interests in {language}"}}\n'
-        f"Rules: 4-8 topics, 8-15 keywords, 3-8 methods, summary max 120 words in {language}."
+        f'"methods": ["...", "..."], "summary": "one paragraph describing research interests in {language}", '
+        f'"taste": "a short paragraph (in {language}) describing the researcher\'s taste and quality bar: '
+        f'how rigorous/selective they are, which venues/provenance they trust, what kind of work they tend '
+        f'to value (theory vs application, depth vs breadth), and what they likely consider low-quality or '
+        f'watery work"}}, \n'
+        f'Rules: 4-8 topics, 8-15 keywords, 3-8 methods, summary max 120 words in {language}, '
+        f'taste max 100 words in {language}. Infer the taste from the library itself; if the library is '
+        f'small or ambiguous, state the most reasonable default for a careful researcher.'
     )
 
 
@@ -167,8 +186,12 @@ class HarnessAgent:
     output. On any failure it falls back to a plain embedding-order digest.
     """
 
-    def __init__(self, config: DictConfig):
+    def __init__(self, config: DictConfig, full_text_fetcher=None):
         self.config = config
+        # Callable[[Paper], str | None]: lazily fetch full text (PDF) on demand
+        # when the agent inspects a paper that has none. Injected by the
+        # executor so the agent can actually read paper content, not just metadata.
+        self.full_text_fetcher = full_text_fetcher
         llm_cfg = config.llm or {}
         api_cfg = llm_cfg.get("api") or {}
         self.language = llm_cfg.get("language", "English")
@@ -205,13 +228,15 @@ class HarnessAgent:
             return None
         try:
             data = json.loads(path.read_text())
-            if data.get("key") != key:
+            # schema bump invalidates caches written before the taste field
+            if data.get("key") != key or data.get("schema") != 2:
                 return None
             return ResearchProfile(
                 topics=data.get("topics", []),
                 keywords=data.get("keywords", []),
                 methods=data.get("methods", []),
                 summary=data.get("summary", ""),
+                taste=data.get("taste", ""),
             )
         except Exception as exc:
             logger.warning(f"Failed to load cached research profile: {exc}")
@@ -223,11 +248,13 @@ class HarnessAgent:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps({
+                "schema": 2,
                 "key": key,
                 "topics": profile.topics,
                 "keywords": profile.keywords,
                 "methods": profile.methods,
                 "summary": profile.summary,
+                "taste": profile.taste,
             }))
             tmp.replace(path)
         except Exception as exc:
@@ -256,6 +283,7 @@ class HarnessAgent:
                 keywords=data.get("keywords", []),
                 methods=data.get("methods", []),
                 summary=data.get("summary", ""),
+                taste=data.get("taste", ""),
             )
             if not profile.topics and not profile.keywords:
                 logger.warning("LLM returned an empty research profile; treating as failure")
@@ -306,9 +334,11 @@ class HarnessAgent:
                 "function": {
                     "name": "inspect_paper",
                     "description": (
-                        "Show the full abstract (and preview of full text, if already "
-                        "fetched) for one candidate by its index. Use this to dig into a "
-                        "paper before deciding to recommend it."
+                        "Show the full content of one candidate by its index: authors, "
+                        "affiliations when available, abstract, and the paper's full "
+                        "text (fetched from the PDF on demand if not already loaded). "
+                        "Use this to actually READ a paper before judging it — judge "
+                        "the work's quality from its content, not just the title."
                     ),
                     "parameters": {
                         "type": "object",
@@ -378,8 +408,19 @@ class HarnessAgent:
                                             "description": "why this paper matters to the user",
                                         },
                                         "tldr": {"type": "string", "description": "optional one-line takeaway"},
+                                        "work_score": {
+                                            "type": "number",
+                                            "description": (
+                                                "YOUR quality judgement of the paper's work itself, 0-10: "
+                                                "how rigorous, novel and trustworthy it is (method soundness, "
+                                                "experimental completeness, author/institution provenance, "
+                                                "venue). High embedding relevance does NOT mean high work "
+                                                "quality — reject watery/低质 work from weak or unknown "
+                                                "institutions. Required for every paper."
+                                            ),
+                                        },
                                     },
-                                    "required": ["index", "reason"],
+                                    "required": ["index", "reason", "work_score"],
                                 },
                             },
                             "outro": {"type": "string", "description": "closing paragraph"},
@@ -416,7 +457,8 @@ class HarnessAgent:
             f"Topics: {', '.join(profile.topics)}\n"
             f"Keywords: {', '.join(profile.keywords)}\n"
             f"Methods: {', '.join(profile.methods)}\n"
-            f"Summary: {profile.summary}"
+            f"Summary: {profile.summary}\n"
+            f"Taste / quality bar: {profile.taste or 'careful researcher: values rigorous, well-sourced work'}"
         )
 
         harness_cfg = self.config.llm.get("harness") or {}
@@ -498,25 +540,34 @@ class HarnessAgent:
             "(embedding score 0-10 is a hint, not a command). Look at the whole "
             "list, not just the top of the first page.\n"
             "2. DEEP-DIVE: use inspect_paper on at least 3 papers you are seriously "
-            "considering. Read their abstracts (and full text when available) — do "
-            "not recommend a paper you have not inspected.\n"
+            "considering. Read their abstracts and full text — inspect_paper shows "
+            "the full paper content (fetched from the PDF when needed), so actually "
+            "read it to judge the work, not just the title. Do not recommend a "
+            "paper you have not inspected.\n"
             "3. FOCUS: use search_candidates to zoom into a topic, and "
             "compare_papers to weigh two candidates against each other when in doubt.\n"
-            "4. DECIDE: choose a focused set of genuinely relevant papers (typically "
-            "3-6) over a huge dump: quality over quantity. Every pick must earn its "
-            "place; unpicked candidates will still be listed separately at the bottom "
-            "of the email, so you are free to be selective. A good reason must connect "
-            "the paper to the user's actual interests — say what the paper contributes "
-            "and why it matters to this specific researcher, not a generic abstract "
-            "paraphrase. Keep each reason compact (2-4 sentences); skip filler.\n"
-            "IMPORTANT — ordering: the order of the papers array in submit_digest is "
-            "exactly the order the reader will see the cards in the email. Rank them "
-            "like an experienced researcher recommending to a colleague: lead with "
-            "the paper that matters most to THIS reader (strongest match, most "
-            "important result, best timing), then the next, and so on. Do not sort by "
-            "the embedding score — it is only a hint. Your editorial judgement of "
-            "value determines the order.\n"
-            "5. WRITE: the digest in " + self.language + ". The subject should be "
+            "4. DECIDE — judge on TWO axes, and trust BOTH:\n"
+            "   (a) RELEVANCE: does the paper serve the profile's topics/methods? "
+            "The embedding score is a cheap hint; your read of the actual content "
+            "is authoritative.\n"
+            "   (b) WORK QUALITY (most important — the web is full of watery papers): "
+            "score the paper's own merit 0-10 (work_score): is the method sound and "
+            "novel, are experiments/evidence complete, are the claims backed by the "
+            "content, and — critically — is the provenance credible (known labs / "
+            "real institutions / reputable venues) versus unknown or low-credibility "
+            "affiliations? A paper can rank high by embedding yet be shallow, padded, "
+            "or from a sketchy source — do not be fooled. Drop watery/low-quality "
+            "papers even when they look relevant, and never pad the digest with them.\n"
+            "   (c) TASTE: the profile's taste line describes what this researcher "
+            "actually values. Prefer papers that fit their taste (depth, style, "
+            "provenance), not just topic keywords.\n"
+            "5. ORDER: the order of the papers array in submit_digest is exactly the "
+            "order of the cards in the email. Rank like an experienced researcher "
+            "recommending to a colleague: lead with the paper that best combines "
+            "(work quality x relevance x taste fit) for THIS reader — strongest "
+            "match, most important result, best timing. Do NOT sort by the embedding "
+            "score; your editorial judgement rules.\n"
+            "6. WRITE: the digest in " + self.language + ". The subject should be "
             "short, informative, and in the same language; the intro should give "
             "context (what today's batch looks like overall); the outro should sign "
             "off warmly and look ahead.\n"
@@ -525,10 +576,12 @@ class HarnessAgent:
             "reader only sees the papers you pick, never the index list, so such "
             "references are meaningless and confusing. Refer to papers by their "
             "titles instead.\n"
-            "6. SUBMIT: call submit_digest with the finished subject, intro, per-paper "
-            "recommendation reasons, and outro. You may only submit after you have "
-            "inspected at least 3 papers with inspect_paper; if you try to submit "
-            "earlier you will be asked to keep working.\n\n"
+            "7. SUBMIT: call submit_digest with the finished subject, intro, per-paper "
+            "recommendation reasons, and outro. Every paper MUST carry a work_score "
+            "(0-10) reflecting your quality judgement — the reader sees it next to "
+            "the relevance badge, so make it honest and defensible. You may only "
+            "submit after you have inspected at least 3 papers with inspect_paper; "
+            "if you try to submit earlier you will be asked to keep working.\n\n"
             "Quality bar: reasons should be specific and insightful, not generic. "
             "Never invent content that is not in the paper's abstract or full text. "
             "If nothing is worth recommending, submit an empty papers list with an "
@@ -669,6 +722,12 @@ class HarnessAgent:
             f"Draft digest:\n{draft_text}\n\n"
             "Grade the draft on:\n"
             "- Relevance: do the picks genuinely serve the profile topics/methods?\n"
+            "- Work quality (critical): did the generator reject watery/low-quality "
+            "papers (weak methods, incomplete evidence, low-credibility provenance) "
+            "even when they look relevant? Are the work_score values honest and "
+            "defensible (0-10)? Is any recommended paper likely to be 水文/低质?\n"
+            "- Taste fit: do the picks match the profile's taste line (depth, style, "
+            "provenance expectations), not just topic keywords?\n"
             "- Specificity: is each reason concrete and tied to the paper, or a generic paraphrase?\n"
             "- Coverage: are any highly-relevant candidates wrongly ignored?\n"
             "- Language/format: consistent language, no index-number references, sane length.\n\n"
@@ -743,10 +802,24 @@ class HarnessAgent:
         if not (0 <= index < len(candidates)):
             return f"Index out of range (0..{len(candidates)-1})."
         p = candidates[index]
+        # Lazily fetch the full text (PDF) on demand so the agent can actually
+        # read the paper's content when it wants to judge quality — not just
+        # metadata. Failures degrade to whatever we already have.
+        if not p.full_text and self.full_text_fetcher is not None:
+            try:
+                fetched = self.full_text_fetcher(p)
+                if fetched:
+                    p.full_text = fetched
+            except Exception as exc:
+                logger.warning(f"On-demand full-text fetch failed for {p.title}: {exc}")
         body = p.full_text or p.abstract or ""
+        affil = ""
+        if getattr(p, "affiliations", None):
+            affil = f"Affiliations: {', '.join(p.affiliations[:6])}\n"
         return (
             f"[{index}] {p.title}\n"
             f"Authors: {_authors_line(p)}\n"
+            f"{affil}"
             f"URL: {p.url}\n"
             f"Full abstract:\n{p.abstract}\n"
             f"Full-text preview:\n{_truncate(body, 4000)}"
@@ -797,6 +870,7 @@ class HarnessAgent:
                     index=idx,
                     reason=str(item.get("reason", "")),
                     tldr=str(item.get("tldr", "")),
+                    work_score=_parse_work_score(item.get("work_score")),
                 )
             )
         return Digest(

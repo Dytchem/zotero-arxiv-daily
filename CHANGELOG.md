@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## [1.4.0] - 2026-08-03
+
+### Added
+- **Work-quality scoring (Work badge)**: every recommended card now shows a
+  `work_score` (0–10) — the agent's judgement of the paper's own merit
+  (rigour, novelty, method soundness, provenance). The generator must supply
+  it for every pick, the evaluator audits it, and the email renders it as a
+  color-coded chip next to Relevance (green ≥ 7, amber 5–7, red < 5; hidden
+  when the LLM path is unavailable).
+- **Taste-aware research profile**: the profile distillation now also infers
+  the researcher's *taste* and quality bar (what they value, which
+  provenance they trust, what they'd consider watery). Picks are matched to
+  it, not just to topic keywords. Profile cache schema bumped (old caches
+  rebuild automatically).
+- **On-demand full-text reading**: `inspect_paper` now fetches the PDF full
+  text lazily via an injected fetcher, so the agent actually reads paper
+  content when judging work quality — not just titles/abstracts. Fetch
+  failures degrade gracefully to whatever metadata exists.
+
+### Changed
+- Harness system prompt and evaluator prompt reworked: judge on two axes
+  (relevance AND work quality), trust the Work chip over the embedding hint,
+  order cards by (quality × relevance × taste fit) editorial judgement —
+  watery/低质 work is dropped even when it looks on-topic.
+- `DigestPaper` gains `work_score`; `submit_digest` requires it per paper.
+- `HarnessAgent` accepts an optional `full_text_fetcher` (injected by the
+  executor via `_populate_full_text`).
+- README (EN/ZH) updated with the Work badge and taste-matching features.
+
 ## [1.3.1] - 2026-08-02
 
 ### Changed

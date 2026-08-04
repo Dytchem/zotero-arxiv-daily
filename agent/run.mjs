@@ -582,7 +582,7 @@ async function main() {
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
-  const maxSteps = input.max_steps ?? 12;
+  const maxSteps = input.max_steps ?? 100;
   const cacheDir = input.cache_dir || path.join(AGENT_DIR, "..", ".cache");
   const fullTextCacheMax = input.full_text_cache_max ?? 200;
   const webSearchBudget = input.web_search_budget ?? 15;

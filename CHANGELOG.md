@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.4] - 2026-08-04
+
+### Fixed
+- **Agent was forced to submit after reading only the first page of each
+  paper** (serious): `llm.harness.max_steps` defaulted to 12, and the Pi
+  agent counts every tool invocation against that budget. A real run burned
+  all 12 steps on 2 list views + 5 full-text fetches + 5 first-page reads —
+  so the 5 follow-up `inspect_paper(offset=12000)` calls (second pages) were
+  all rejected and the agent had to submit with every paper half-read, with
+  no budget left for `search_web` / `compare_papers`. The default is now
+  **100** — enough to fully read several papers AND search provenance.
+
+### Changed
+- ROLE.md gains a "How to spend your budget (deep, not wide)" section:
+  read whole papers (page until the end / methods+results), depth over
+  breadth (2–4 fully-read candidates > 10 half-read titles), use
+  `search_candidates` / `compare_papers` / `finish_reading` / `search_web`
+  instead of only inspect+submit, and verify provenance with `search_web`
+  before giving any score ≥ 7.
+
 ## [1.5.3] - 2026-08-04
 
 ### Fixed

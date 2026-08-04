@@ -22,7 +22,7 @@ llm:
     enabled: true
     top_k: 100
     full_text_budget: 10
-    max_steps: 12
+    max_steps: 100
     min_inspections: 3
     max_revisions: 2
     evaluator_enabled: true

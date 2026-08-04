@@ -382,6 +382,8 @@ function buildTools(ctx) {
         if (!q) return textResult("Empty query.");
         const maxResults = Math.min(Math.max(params.max_results ?? 5, 1), 10);
         const apiKey = process.env.ANYSEARCH_API_KEY || "";
+        let attempts = 0;
+        for (;;) {
         try {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 30000);
@@ -396,12 +398,29 @@ function buildTools(ctx) {
           });
           clearTimeout(timer);
           if (!resp.ok) {
-            return textResult(`search_web failed: HTTP ${resp.status} ${(await resp.text()).slice(0, 200)}`);
+            // Transient failure (rate limit / shared-IP quota / upstream blip),
+            // NOT a broken tool. Give the agent a clear fallback path so it
+            // keeps working from abstracts instead of stalling or concluding
+            // the tool is broken. Retry once on 429/5xx after a short wait.
+            const status = resp.status;
+            const body = (await resp.text()).slice(0, 200);
+            if ((status === 429 || status >= 500) && attempts < 2) {
+              attempts += 1;
+              await new Promise((r) => setTimeout(r, 2000 * attempts));
+              continue;
+            }
+            return textResult(
+              `search_web temporarily unavailable (HTTP ${status}${body ? " " + body : ""}). ` +
+                `This is a rate limit / transient network issue, not your mistake. ` +
+                `Do NOT stall: judge from the abstract, authors and venue you already have, ` +
+                `score conservatively when provenance is unverifiable, and move on. ` +
+                `You may retry this search once or twice later if you still need it.`
+            );
           }
           const data = await resp.json();
           const items = (data.data || data.results || []).slice(0, maxResults);
           if (!items.length) {
-            return textResult(`No web results for "${q}".`);
+            return textResult(`No web results for "${q}" — proceed with abstract/title evidence.`);
           }
           const lines = items.map((r, i) => {
             const title = r.title || r.name || "(no title)";
@@ -412,8 +431,11 @@ function buildTools(ctx) {
           return textResult(`Web results for "${q}":\n\n` + lines.join("\n\n"));
         } catch (err) {
           return textResult(
-            `search_web error: ${String(err.message || err).slice(0, 300)}`
+            `search_web transient error (${String(err.message || err).slice(0, 200)}). ` +
+              `Same guidance: it is a network/rate-limit issue, not a broken tool — ` +
+              `judge from abstract/title evidence, score conservatively, move on.`
           );
+        }
         }
       },
     },

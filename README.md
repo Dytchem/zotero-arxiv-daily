@@ -5,11 +5,11 @@
 <h1 align="center">Zotero-arXiv-Daily</h1>
 
 <p align="center">
-  <em>Your AI research librarian — reads your Zotero library, scans arXiv/bioRxiv/medRxiv daily, and recommends papers with real editorial judgement.</em>
+  <em>Your AI research librarian — reads your Zotero library, scans arXiv/bioRxiv/medRxiv daily, and emails a digest with real editorial judgement.</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
+  <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
   <img src="https://img.shields.io/badge/tests-195-brightgreen?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
@@ -21,36 +21,38 @@
 
 ## What it does
 
-Every morning, a GitHub Actions workflow (free, no server):
+Every morning a GitHub Actions workflow (free, no server of yours):
 
 1. **Learns your taste** from your Zotero library — topics, methods, and the *quality bar* you actually read at.
 2. **Pulls the newest papers** from arXiv, bioRxiv and medRxiv.
 3. **Shortlists candidates** with fast deterministic math (embeddings + BM25 + recency).
-4. **Lets an autonomous agent decide** — it fetches full texts itself, reads them page by page, scores each paper's *work quality* (0–10), and writes the digest in your language.
-5. **Emails you a polished HTML digest**: intro, expert-ordered cards with a **Relevance** chip and a **Work** chip, and a full "other candidates" section — every paper scored, nothing silently dropped.
+4. **Lets an autonomous agent decide** — it browses the *full pool* of today's papers (not just the pre-filtered list), fetches full texts itself, reads them page by page (delegating long papers to a sub-agent), verifies provenance online, and scores each paper's *work quality* (0–10).
+5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Work** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped.
 
-The math ranks; the agent decides. Embedding scores are hints, not verdicts.
+**The math ranks; the agent decides.** Embedding scores are hints, not verdicts.
 
 ## Key features
 
-- **Pi agent engine** (`agent/run.mjs` + `agent/ROLE.md`) — a real coding agent with its own tools: `inspect_candidates`, `fetch_full_text`, `inspect_paper` (paged), `search_candidates`, `search_web`, `compare_papers`, `submit_digest`. It decides what to read, fetches and reads the papers itself, and grounds every recommendation in the actual content.
+- **Pi agent engine** (`agent/run.mjs` + `agent/ROLE.md`) — a real coding agent with its own tools: `inspect_candidates`, `inspect_pool`, `fetch_full_text`, `inspect_paper` (paged), `summarize_paper` (sub-agent for long papers), `search_web`, `search_candidates`, `compare_papers`, `finish_reading`, `submit_digest`. It decides what to read, fetches and reads the papers itself, and grounds every recommendation in the actual content.
+- **Full-pool visibility** — the agent sees every deduplicated paper from today's fetch, including ones the keyword/min-score/max-count filters dropped. A high-value paper that the heuristics missed can still be rescued, read and recommended — and it shows up in the email with a "pool" note.
 - **Work-quality scoring** — every candidate (picked or not) gets a **Work** badge (0–10) judging rigour, novelty and provenance. Watery/低质 papers are called out even when they look on-topic.
-- **Defensible ordering** — stronger work first; the evaluator audits inversions.
-- **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended.
-- **Generator + Evaluator** — an independent reviewer grades each draft and drives revision rounds.
+- **Defensible ordering** — stronger work first; the reader can compare the badges.
+- **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended. Long papers are delegated to a sub-agent so nothing is skipped.
 - **Safe rendering** — every text field HTML-escaped, LaTeX→Unicode, links whitelisted. The agent writes JSON, never markup.
+- **Provider-safe by design** — the LLM provider is created programmatically from `OPENAI_API_BASE` + `OPENAI_API_KEY` with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.
 - **Graceful degradation** — Pi failure → Python harness → embedding-order digest. The email always goes out.
 - **Gap-free lookback, sent-history dedupe, multi-source, multi-recipient, webhook notifier, bilingual (EN/ZH).**
 
 ## Quick start
 
 1. **Fork** this repo.
-2. **Configure** — fill in `config/custom.yaml` (committed example; CI overwrites it from the `CUSTOM_CONFIG` variable) with:
-   - Zotero: `user_id`, `api_key`
-   - LLM: `OPENAI_API_KEY`, `OPENAI_API_BASE` (OpenRouter recommended)
-   - Email: `SENDER`, `RECEIVER`, `SENDER_PASSWORD`
-   - Your arXiv categories under `source.arxiv.category`
-3. **Run** — the workflow fires daily at 22:00 UTC (06:00 Beijing, right after arXiv's release). Trigger manually anytime: *Actions → Send emails daily → Run workflow*.
+2. **Configure** — set repository **Secrets** (Actions → Settings → Secrets):
+   - `ZOTERO_ID`, `ZOTERO_KEY` — your Zotero user ID and API key
+   - `OPENAI_API_KEY`, `OPENAI_API_BASE` — an LLM API key + base URL (OpenRouter recommended)
+   - `SENDER`, `RECEIVER`, `SENDER_PASSWORD` — SMTP credentials
+   - *Optional:* `ANYSEARCH_API_KEY` (raises `search_web` rate limits)
+   - Set the **Variable** `CUSTOM_CONFIG` — a YAML override with your arXiv categories and reranker (see `config/custom.yaml` in the repo)
+3. **Run** — the workflow fires daily at 22:00 UTC (06:00 Beijing, right after arXiv's release). Trigger manually anytime: *Actions → Send emails daily → Run workflow*. Use **Run workflow → `reset_history` = true** for a test send.
 
 Local debug (renders the email without sending):
 
@@ -65,30 +67,30 @@ Full config reference: [`config/base.yaml`](config/base.yaml).
 
 ```
 Zotero library ──► build_profile (LLM, cached)
-Feeds ──► retrieve ──► rerank (embeddings+BM25) ──► filter ──► top-N candidates
-                                                            │
-                        ┌───────────────────────────────────▼──────────┐
-                        │  Pi agent (Node, agent/run.mjs + ROLE.md)     │
-                        │  reads profile + raw Zotero library + list    │
-                        │  fetches full texts itself, pages through,    │
-                        │  scores Work 0–10, submits digest JSON        │
-                        └───────────────────────────────────┬──────────┘
-                        (fallback: Python HarnessAgent → embedding order)
-                                                            ▼
-                        construct_email (safe HTML) ──► email / webhook
+Feeds ──► retrieve ──► rerank (embeddings+BM25) ──► filter ──► candidates (top-N)
+                                                                 │
+                      ┌──────────────────────────────────────────▼─────────────┐
+                      │  Pi agent (Node, agent/run.mjs + ROLE.md)               │
+                      │  sees the FULL pool (candidates + filtered-out papers)  │
+                      │  fetches full texts itself, pages through,              │
+                      │  scores Work 0–10, submits digest JSON                  │
+                      └──────────────────────────────────────────┬─────────────┘
+                      (fallback: Python HarnessAgent → embedding order)
+                                                                 ▼
+                      construct_email (safe HTML) ──► email / webhook
 ```
 
 ## Project layout
 
 ```
-src/zotero_arxiv_daily/   Python pipeline: executor, harness (legacy engine),
-                          construct_email, retrievers, rerankers, notifier
+src/zotero_arxiv_daily/   Python pipeline: executor, construct_email, retrievers,
+                          rerankers, notifier, legacy Python harness
 agent/                    Pi agent engine: run.mjs, ROLE.md, fetch_text.py
-                          (custom provider from env vars OPENAI_API_BASE + OPENAI_API_KEY,
-                           no built-in provider catalog to avoid mimo etc.)
+                          (provider built from env vars OPENAI_API_BASE + OPENAI_API_KEY;
+                           no models.json, no built-in provider catalog)
 config/                   base.yaml (schema) + custom.yaml (overrides)
 tests/                    195 tests, ruff-clean
-docs/HARNESS.md           generator/evaluator design
+docs/HARNESS.md           generator/evaluator design notes
 ```
 
 ## Upstream & license

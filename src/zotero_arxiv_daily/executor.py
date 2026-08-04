@@ -353,10 +353,11 @@ class Executor:
             "model": agent.model,
             "language": agent.language,
             "cache_dir": str(cache_dir),
-            "max_steps": int(harness_cfg.get("max_steps", 300)),
+            # run.mjs reads only what it needs: model, language, cache paths,
+            # thinking_level, profile, corpus, pool. max_steps / web_search_budget
+            # were removed in v1.5.6 (agent runs free) and are NOT sent anymore.
             "thinking_level": harness_cfg.get("thinking_level", "max"),
             "full_text_cache_max": int(self.config.executor.get("full_text_cache_max", 200)),
-            "web_search_budget": int(harness_cfg.get("web_search_budget", 15)),
             "profile": {
                 "topics": profile.topics,
                 "keywords": profile.keywords,
@@ -674,7 +675,13 @@ class Executor:
         t_agent = time.time()
         # Reset the Pi-pool marker from any previous run on this instance.
         self._pi_pool = None
-        digest = self._agent_digest(ranked, corpus, pool=all_papers)
+        # The pool is ALL deduplicated papers from today's fetch — but still
+        # filtered by sent-history: papers already shown in previous emails are
+        # excluded so the agent cannot re-recommend yesterday's picks (the
+        # pipeline-level dedupe below would not catch them since they were
+        # never in ``ranked``). Debug/reset-history mode bypasses this.
+        pool = self._filter_sent_history(all_papers)
+        digest = self._agent_digest(ranked, corpus, pool=pool)
         logger.info(f"[stage:agent] digest produced in {time.time() - t_agent:.1f}s")
 
         # Digest indexes refer to the FULL pool when the Pi agent succeeded

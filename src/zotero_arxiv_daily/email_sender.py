@@ -40,7 +40,7 @@ def send_email(config: DictConfig, html: str, subject: str | None = None) -> Non
     smtp_port = config.email.smtp_port
 
     msg = MIMEText(html, 'html', 'utf-8')
-    msg['From'] = _format_addr(f'Github Action <{sender}>')
+    msg['From'] = _format_addr(f'Zotero-arXiv-Daily <{sender}>')
     msg['To'] = _format_addr(f'You <{receivers[0]}>')
     if len(receivers) > 1:
         msg['Cc'] = ', '.join(_format_addr(f'CC <{r}>') for r in receivers[1:])

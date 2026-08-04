@@ -2,7 +2,17 @@
 
 All notable changes to this project are documented here.
 
-## [1.5.9] - 2026-08-04
+## [1.6.0] - 2026-08-04
+
+### Changed
+- **代码简化与清理（大道至简）**：
+  - `agent/models.json` 已删除 —— run.mjs 自 v1.5.8 起使用编程式 `createProvider`（环境变量读 baseUrl/apiKey），不再读取该文件。
+  - run.mjs 删除从未读取的 `inspected` 死集合、`buildTools` 中未使用的 `language` 参数；`toolLog` 现在打印真实工具名（之前全部硬编码 "TOOL"，日志无法区分）。
+  - executor 传给 run.mjs 的 `input_payload` 删除 `max_steps` / `web_search_budget` 两个死字段（v1.5.6 起 agent 无硬限制，run.mjs 不读它们）。
+  - **pool 去重修复**：传给 agent 的 pool 现在也过 `_filter_sent_history` 过滤（debug/reset_history 模式除外）——此前 pool 包含已发论文，agent 可能从池中重复推荐昨天已展示过的论文；现在已发论文不会再次进入 agent 视野。
+  - email 发件人显示名从 "Github Action" 改为 "Zotero-arXiv-Daily"；other-candidates 列表标题补上 `_strip_markdown`（与卡片标题一致）。
+- 版本号 1.5.9 → 1.6.0。
+
 
 ### Changed
 - **全池可见（避免高价值论文被略去）**：agent 现在看到当天去重后的**全部**论文，不只是被 min_score/keyword/max_paper_num 过滤后的 top-N 候选。候选区（indices 0..candidate_count-1）信息更足（带 embedding score，排序靠前），其余论文在候选区之后（indices candidate_count..pool_size-1，标记 `[pool]`）。

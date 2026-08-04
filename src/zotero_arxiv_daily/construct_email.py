@@ -309,7 +309,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
     rows = ""
     for i, p in enumerate(papers):
         orig_index = indices[i] if indices else i
-        title_text = _safe(_mathify(p.title))
+        title_text = _safe(_strip_markdown(_mathify(p.title)))
         clean_url = _clean_link(p.url)
         link = f'<a href="{clean_url}" style="color:#111827;text-decoration:none;">{title_text}</a>' if clean_url else title_text
         badge = ""

@@ -18,10 +18,11 @@
 // Usage:
 //   OPENAI_API_KEY=... node run.mjs --input in.json --output digest.json
 //
-// The provider is custom (see models.json): apiKey comes from $OPENAI_API_KEY
-// (env interpolation), baseUrl points at OpenRouter. The repo deliberately has
-// no OPENROUTER_API_KEY — the built-in openrouter provider reads that var and
-// would find nothing, so we define our own.
+// The provider is created programmatically (no models.json, no built-in
+// provider catalog): baseUrl + apiKey come from OPENAI_API_BASE /
+// OPENAI_API_KEY, and the runtime exposes ONLY the configured model. This
+// deliberately excludes Pi's built-in providers (whose model catalogs include
+// models like xiaomi/mimo that would silently be called with the same key).
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -82,9 +83,8 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { pool, candidateCount, profile, language, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
+  const { pool, candidateCount, profile, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
   const candidates = pool; // unified index space: candidates first, rest after
-  const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Used for the soft finish_reading nudge.
   const readDepth = new Map();
@@ -109,7 +109,7 @@ function buildTools(ctx) {
         index: Type.Integer({ description: "index into the Zotero library list (1-based as shown)" }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("inspect_library_paper", params);
         const lib = library || [];
         const idx = params.index - 1;
         const c = lib[idx];
@@ -140,7 +140,7 @@ function buildTools(ctx) {
         }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("inspect_candidates", params);
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 20, 50);
         const slice = candidates.slice(start, start + count);
@@ -182,7 +182,7 @@ function buildTools(ctx) {
         }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("inspect_pool", params);
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 20, 50);
         const slice = candidates.slice(start, start + count);
@@ -217,7 +217,7 @@ function buildTools(ctx) {
         index: Type.Integer({ description: "pool index" }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("fetch_full_text", params);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (p.full_text) {
@@ -312,7 +312,7 @@ function buildTools(ctx) {
         }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("inspect_paper", params);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (!p.full_text) {
@@ -322,7 +322,6 @@ function buildTools(ctx) {
               `extract it (or use bash yourself), then inspect_paper again.`
           );
         }
-        inspected.add(params.index);
         const full = p.full_text || "";
         const pageSize = 8000;
         // Clamp the offset: negative offsets (JS slice counts from the end)
@@ -378,7 +377,7 @@ function buildTools(ctx) {
         ),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("search_web", params);
         const q = String(params.query || "").trim();
         if (!q) return textResult("Empty query.");
         const maxResults = Math.min(Math.max(params.max_results ?? 5, 1), 10);
@@ -427,7 +426,7 @@ function buildTools(ctx) {
         query: Type.String({ description: "keyword(s) to match" }),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("search_candidates", params);
         const q = (params.query || "").toLowerCase().trim();
         if (!q) return textResult("Empty query.");
         const hits = [];
@@ -455,7 +454,7 @@ function buildTools(ctx) {
         index_b: Type.Integer(),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("compare_papers", params);
         const a = candidates[params.index_a];
         const b = candidates[params.index_b];
         if (!a || !b) return textResult("One of the indexes is out of range.");
@@ -476,7 +475,7 @@ function buildTools(ctx) {
         ),
       }),
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("summarize_paper", params);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const full = p.full_text || "";
@@ -540,7 +539,7 @@ function buildTools(ctx) {
       }),
       required: ["index", "methods", "experiments", "limitations", "confidence"],
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("finish_reading", params);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const read = readDepth.get(params.index) || 0;
@@ -613,7 +612,7 @@ function buildTools(ctx) {
       }),
       required: ["subject", "intro", "papers", "outro"],
       execute: async (_toolCallId, params) => {
-        toolLog("TOOL", params);
+        toolLog("submit_digest", params);
         // Data-contract checks only (the email renderer needs these fields);
         // how the agent got there is its own business.
         const picked = new Set((params.papers || []).map((p) => p.index));

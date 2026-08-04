@@ -320,6 +320,7 @@ class Executor:
             return None
 
         harness_cfg = llm_cfg.get("harness") or {}
+        cache_dir = Path(self.config.executor.get("cache_dir") or ".cache")
         # The agent also gets the raw Zotero library (recent papers, newest
         # first) — not just the distilled profile — so it can judge the
         # researcher's interests and taste itself.
@@ -329,7 +330,7 @@ class Executor:
         input_payload = {
             "model": agent.model,
             "language": agent.language,
-            "min_inspections": int(harness_cfg.get("min_inspections", 3)),
+            "cache_dir": str(cache_dir),
             "max_steps": int(harness_cfg.get("max_steps", 12)),
             "profile": {
                 "topics": profile.topics,
@@ -368,7 +369,6 @@ class Executor:
                 for i, p in enumerate(candidates)
             ],
         }
-        cache_dir = Path(self.config.executor.get("cache_dir") or ".cache")
         cache_dir.mkdir(parents=True, exist_ok=True)
         in_path = cache_dir / "pi_input.json"
         out_path = cache_dir / "pi_digest.json"
@@ -513,9 +513,19 @@ class Executor:
         The subject is deliberately NOT left to the agent's free style — the
         owner wants a stable, scannable format across days. The agent's
         creative subject is discarded; only the body content is its own.
+
+        The date is taken in Asia/Shanghai (the owner's timezone), matching
+        the in-email date line — the GitHub Actions runner runs in UTC, and
+        using runner-local time would make the subject date drift a day from
+        the body (e.g. 22:00 UTC is already the next day in Shanghai).
         """
         language = (self.config.llm or {}).get("language", "English")
-        now = _dt.datetime.now()
+        try:
+            from zoneinfo import ZoneInfo
+
+            now = _dt.datetime.now(ZoneInfo("Asia/Shanghai"))
+        except Exception:
+            now = _dt.datetime.now()
         if language.lower().startswith("chinese"):
             return f"Zotero-arXiv-Daily 每日推荐 · {now.year}年{now.month}月{now.day}日"
         return f"Zotero-arXiv-Daily Daily Digest · {now.year}-{now.month:02d}-{now.day:02d}"

@@ -113,8 +113,8 @@ def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | Non
     file_contents = {}
     doc_block_candidates: list[str] = []
     for t in tex_files:
-        f = tar.extractfile(t)
-        content = f.read().decode('utf-8',errors='ignore')
+        with tar.extractfile(t) as f:
+            content = f.read().decode('utf-8',errors='ignore')
         content = re.sub(r'%.*\n', '\n', content)
         content = re.sub(r'\\begin{comment}.*?\\end{comment}', '', content, flags=re.DOTALL)
         content = re.sub(r'\\iffalse.*?\\fi', '', content, flags=re.DOTALL)

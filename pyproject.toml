@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "zotero-arxiv-daily"
-version = "1.5.0"
+version = "1.5.1"
 description = "Daily arXiv paper recommendations tailored to your Zotero library"
 readme = "README.md"
 requires-python = ">=3.13"

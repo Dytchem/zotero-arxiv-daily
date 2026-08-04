@@ -38,7 +38,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache
-          key: corpus-embeddings
+          # Key MUST change every run: actions/cache does NOT re-save when the
+          # primary key hits, so a fixed key would freeze .cache at the first
+          # run's snapshot and sent_papers.json dedupe would never update
+          # (yesterday's papers would be re-sent every day). run_id makes each
+          # run's cache unique; restore-keys falls back to the previous run's.
+          key: corpus-embeddings-${{ github.run_id }}
           restore-keys: corpus-embeddings-
 
       - name: Reset sent-history (test mode)

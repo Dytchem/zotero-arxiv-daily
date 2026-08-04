@@ -12,6 +12,13 @@ class BaseReranker(ABC):
 
     def rerank(self, candidates:list[Paper], corpus:list[CorpusPaper]) -> list[Paper]:
         from ..utils import bm25_scores
+        if not corpus:
+            # No reference papers to compare against: nothing to rank by.
+            # Keep input order (everything scores 0) so the pipeline still
+            # degrades gracefully instead of dividing by zero below.
+            for c in candidates:
+                c.score = 0.0
+            return candidates
         corpus = sorted(corpus,key=lambda x: x.added_date,reverse=True)
         time_decay_weight = 1 / (1 + np.log10(np.arange(len(corpus)) + 1))
         time_decay_weight: np.ndarray = time_decay_weight / time_decay_weight.sum()

@@ -61,7 +61,7 @@ function toolLog(name, params) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath } = ctx;
+  const { candidates, profile, language, digestPath, cacheDir } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Guarantees the agent READ the papers it recommends
@@ -73,6 +73,10 @@ function buildTools(ctx) {
   // recommendations must be grounded in them, and submit_digest refuses
   // picks that have no notes (work not done).
   const readingNotes = new Map();
+  // Shared full-text disk cache (also written by the Python pipeline), so
+  // texts fetched by either side are reused by the other. Located under the
+  // configured cache_dir (default .cache) — same file the Python side uses.
+  const fullTextCachePath = path.join(cacheDir, "full_texts.json");
 
   const tools = [
     {
@@ -134,7 +138,7 @@ function buildTools(ctx) {
             `Already fetched (${p.full_text.length} chars). Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
           );
         }
-        const cachePath = path.join(AGENT_DIR, "..", ".cache", "full_texts.json");
+        const cachePath = fullTextCachePath;
         // Reuse the shared disk cache first (the Python side may have prefetched).
         try {
           if (existsSync(cachePath)) {
@@ -347,7 +351,7 @@ function buildTools(ctx) {
       name: "finish_reading",
       label: "Finish reading (record notes)",
       description:
-        "After you have READ a paper (via inspect_paper, multiple pages), record your structured reading notes: what methods it uses, what experiments/results it reports, its limitations, and how confident you are in your assessment. This is MANDATORY for every paper you seriously consider — your work_score and recommendation reason must be grounded in these notes, and submit_digest will refuse to recommend a paper that has no notes. Call it once per paper after you finish reading.",
+        "After you have READ a paper (via inspect_paper, multiple pages), record your structured reading notes: what methods it uses, what experiments/results it reports, its limitations, and how confident you are in your assessment. This anchors your work_score and recommendation reason in what you actually read. Call it once per paper you seriously consider — it is strongly recommended, though the digest contract itself does not require it (some papers may have no accessible full text).",
       parameters: Type.Object({
         index: Type.Integer({ description: "candidate index" }),
         methods: Type.String({ description: "the methods/techniques the paper uses (from the full text, be specific)" }),
@@ -433,6 +437,24 @@ function buildTools(ctx) {
         // Data-contract checks only (the email renderer needs these fields);
         // how the agent got there is its own business.
         const picked = new Set((params.papers || []).map((p) => p.index));
+        // Every referenced index must be a real candidate (the renderer maps
+        // index -> paper; an out-of-range index would render as "Paper 999").
+        const badPicked = (params.papers || []).filter(
+          (p) => p.index < 0 || p.index >= candidates.length
+        );
+        if (badPicked.length) {
+          return textResult(
+            `Invalid index in papers: ${badPicked.map((p) => p.index).join(", ")} — indexes must be 0..${candidates.length - 1}. Fix and resubmit.`
+          );
+        }
+        const badOthers = (params.others || []).filter(
+          (o) => o.index < 0 || o.index >= candidates.length
+        );
+        if (badOthers.length) {
+          return textResult(
+            `Invalid index in others: ${badOthers.map((o) => o.index).join(", ")} — indexes must be 0..${candidates.length - 1}. Fix and resubmit.`
+          );
+        }
         const unpicked = [];
         for (let i = 0; i < candidates.length; i++) {
           if (!picked.has(i)) unpicked.push(i);
@@ -487,6 +509,7 @@ async function main() {
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
   const maxSteps = input.max_steps ?? 12;
+  const cacheDir = input.cache_dir || path.join(AGENT_DIR, "..", ".cache");
   const digestPath = args.output;
 
   if (!candidates.length) {
@@ -537,6 +560,7 @@ async function main() {
     profile,
     language,
     digestPath,
+    cacheDir,
   });
 
   const role = readFileSync(path.join(AGENT_DIR, "ROLE.md"), "utf8");

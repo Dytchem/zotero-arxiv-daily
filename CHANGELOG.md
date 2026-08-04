@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.1] - 2026-08-04
+
+### Fixed
+- **Workflow dedupe cache never updated** (serious): the Actions cache key
+  was a fixed `corpus-embeddings`, but `actions/cache` does NOT re-save when
+  the primary key hits — so `.cache` (incl. `sent_papers.json`) froze at the
+  first run's snapshot and yesterday's papers would be re-sent every day.
+  The key is now `corpus-embeddings-${{ github.run_id }}` (with the same
+  restore-keys prefix), so every run saves its own updated cache and the
+  previous run's snapshot is restored as the fallback.
+- **Digest subject date timezone**: the fixed subject now takes its date in
+  Asia/Shanghai (owner's timezone), matching the in-email date line. The
+  GitHub Actions runner runs in UTC, so `datetime.now()` previously made the
+  subject date drift a day from the body (22:00 UTC is already the next day
+  in Shanghai).
+- **Pi agent full-text cache path**: `fetch_full_text` now respects
+  `executor.cache_dir` instead of hard-coding `.cache` — the agent and the
+  Python pipeline share the same on-disk cache even with a custom cache dir.
+- **Empty-corpus rerank divide-by-zero**: `BaseReranker.rerank` with an empty
+  corpus now keeps input order (scores 0) instead of dividing by zero.
+- **Tar file-handle leak**: `extract_tex_code_from_tar` now closes each
+  extracted file handle (`with tar.extractfile(...)`).
+
+### Changed
+- `submit_digest` (Pi agent) validates that every `papers[]`/`others[]`
+  index is in range before accepting — an out-of-range index previously
+  rendered as a bogus "Paper 999" card.
+- `finish_reading` tool description aligned with ROLE.md (recommended, not
+  a hard mandatory gate the digest contract refuses on).
+- Removed the duplicate `_collect_receivers` in `notifier.py` (dead code;
+  the single implementation lives in `email_sender.py`).
+
 ## [1.5.0] - 2026-08-04
 
 ### Added

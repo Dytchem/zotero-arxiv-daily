@@ -115,3 +115,12 @@ def test_rerank_alpha_none_is_pure_vector(config):
     reranker = FixedReranker(config)
     ranked = reranker.rerank(papers, corpus)
     assert ranked[0].title == "Paper 0"
+
+
+def test_rerank_empty_corpus_keeps_order():
+    """Empty corpus must not divide by zero: input order kept, scores 0."""
+    papers = [make_sample_paper(title=f"Paper {i}") for i in range(2)]
+    reranker = StubReranker(np.zeros((2, 0)))
+    ranked = reranker.rerank(papers, [])
+    assert [p.title for p in ranked] == ["Paper 0", "Paper 1"]
+    assert all(p.score == 0.0 for p in ranked)

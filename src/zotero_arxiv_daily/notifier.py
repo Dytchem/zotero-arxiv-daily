@@ -135,21 +135,6 @@ class WebhookNotifier(BaseNotifier):
 # ----------------------------------------------------------------------
 
 
-def _collect_receivers(config: DictConfig) -> list[str]:
-    """Primary recipient + optional extras, deduplicated, order kept.
-
-    Kept here (mirroring :func:`email_sender._collect_receivers`) so the
-    webhook notifier and log lines can resolve recipients without importing
-    the SMTP module; the email notifier imports the SMTP implementation.
-    """
-    primary = config.email.receiver
-    extra = config.email.get("receivers") or []
-    if isinstance(extra, str):
-        extra = [e.strip() for e in extra.split(",") if e.strip()]
-    receivers = [primary] + [r for r in extra if r and r != primary]
-    return list(dict.fromkeys(receivers))
-
-
 def _strip_html(html: str) -> str:
     """Cheap HTML-to-text for webhook backends that don't render HTML."""
     import re

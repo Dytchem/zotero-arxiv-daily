@@ -358,9 +358,23 @@ def test_clean_link():
 
 
 def test_mathify():
-    assert _mathify("$\\alpha + \\beta$") == "α + β"
+    # pylatexenc handles greek letters and operators (exact spacing is its own;
+    # what matters is the LaTeX is gone and readable unicode remains).
+    out = _mathify("$\\alpha + \\beta$")
+    assert "\\alpha" not in out and "\\beta" not in out
+    assert "α" in out and "β" in out
     assert _mathify("plain text") == "plain text"
-    assert _mathify("$\\frac{1}{2}$") == "/12"
+    # \frac becomes a slash fraction (was "/12" under the old hand-rolled
+    # converter — pylatexenc's "1/2" is the correct reading).
+    assert _mathify("$\\frac{1}{2}$") == "1/2"
+    # font-shape commands are dropped, sub/superscripts become unicode
+    assert _mathify("The $\\mathrm{CO}_2$ molecule") == "The CO₂ molecule"
+    assert _mathify("$10^{-3}$ s$^{-1}$") == "10⁻³ s⁻¹"
+    assert _mathify("$\\hbar\\omega$") == "ħω"
+    # chemistry subscript: MoS$2$ -> MoS₂
+    assert _mathify("MoS$2$") == "MoS₂"
+    # prose is untouched (pylatexenc must not eat plain-text & / _)
+    assert _mathify("A & B _C") == "A & B _C"
 
 
 def test_strip_markdown():

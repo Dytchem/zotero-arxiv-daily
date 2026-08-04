@@ -145,6 +145,21 @@ Reading every candidate's full text page-by-page is not required and is
 discouraged: the abstract pass plus focused deep reads of the shortlist is
 what makes the digest defensible.
 
+**How to read the shortlist (cost-aware, quality-first):**
+
+- Prefer `summarize_paper` for long papers — it reads the whole text in a
+  sub-agent and returns dense notes, so you get the full picture without
+  flooding your context with raw text.
+- Use `inspect_paper` for targeted reading: at most 2–3 pages per paper,
+  and only to verify a specific method, number, or claim you need for the
+  `work_score`. Do NOT page through entire papers page-by-page.
+- **Context red line**: your working context grows with every tool result
+  and stays for the rest of the run — and past ~272k tokens the API price
+  per token roughly doubles. Keep the conversation lean: prefer notes over
+  raw text, and don't re-list things you already have.
+- `others` notes: one short sentence max, or omit the note entirely — a
+  score with no note is fine. Nobody reads a paragraph per rejected paper.
+
 ## Deep research — when and how to search
 
 `search_web` exists so your judgement is not limited to what the PDF happens

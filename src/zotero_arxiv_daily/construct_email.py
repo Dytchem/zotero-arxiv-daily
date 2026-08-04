@@ -18,8 +18,12 @@ from __future__ import annotations
 import html
 import re
 
+from pylatexenc.latex2text import LatexNodes2Text
+
 from .harness import Digest, _today_str
 from .protocol import Paper
+
+_LATEX_TO_TEXT = LatexNodes2Text()
 
 framework = """
 <!DOCTYPE HTML>
@@ -64,15 +68,35 @@ _SOURCE_LABELS = {
     "medrxiv": "medRxiv",
 }
 
-# Simple LaTeX command -> unicode substitutions for common math.
-_LATEX_SUBS = {
-    r"\alpha": "α", r"\beta": "β", r"\gamma": "γ", r"\delta": "δ",
-    r"\epsilon": "ε", r"\theta": "θ", r"\lambda": "λ", r"\mu": "μ",
-    r"\sigma": "σ", r"\phi": "φ", r"\omega": "ω", r"\pi": "π",
-    r"\infty": "∞", r"\times": "×", r"\cdot": "·", r"\leq": "≤",
-    r"\geq": "≥", r"\neq": "≠", r"\approx": "≈", r"\pm": "±",
-    r"\sum": "∑", r"\int": "∫", r"\sqrt": "√", r"\frac": "/",
+# Unicode subscript / superscript maps (best-effort; unknown chars fall back
+# to plain text so nothing looks broken).
+_SUBSCRIPTS = {
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ", "k": "ₖ",
+    "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ", "p": "ₚ", "r": "ᵣ",
+    "s": "ₛ", "t": "ₜ", "u": "ᵤ", "v": "ᵥ", "x": "ₓ",
+    "+": "₊", "-": "₋", "(": "₍", ")": "₎", "=": "₌",
 }
+_SUPERSCRIPTS = {
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+    "n": "ⁿ", "i": "ⁱ", "a": "ᵃ", "e": "ᵉ", "x": "ˣ", "m": "ᵐ",
+    "t": "ᵗ", "k": "ᵏ", "o": "ᵒ", "r": "ʳ", "s": "ˢ", "u": "ᵘ",
+    "h": "ʰ", "j": "ʲ", "l": "ˡ", "p": "ᵖ", "b": "ᵇ", "c": "ᶜ",
+    "d": "ᵈ", "f": "ᶠ", "g": "ᵍ", "v": "ᵛ", "w": "ʷ", "y": "ʸ",
+}
+
+
+def _to_subscript(s: str) -> str:
+    out = "".join(_SUBSCRIPTS.get(c, c) for c in s)
+    return out if any(ord(c) > 127 for c in out) else f"_{s}"
+
+
+def _to_superscript(s: str) -> str:
+    out = "".join(_SUPERSCRIPTS.get(c, c) for c in s)
+    return out if any(ord(c) > 127 for c in out) else f"^{s}"
 
 
 def _safe(text: str | None) -> str:
@@ -103,31 +127,40 @@ def _strip_markdown(text: str) -> str:
 
 
 def _mathify(text: str) -> str:
-    """Convert common inline LaTeX to readable unicode, keeping the rest plain.
+    """Convert LaTeX math in prose to readable plain text.
 
-    Only replaces $...$ spans and known commands; unknown commands are kept
-    as-is (escaped) so nothing breaks the HTML and no raw backslashes leak
-    into the rendered subject/title text in a confusing way. The goal is
-    *readability*, not full LaTeX rendering.
+    Parsing is delegated to pylatexenc (mature LaTeX parser: handles \\rm/
+    \\mathrm fonts, \\frac, \\times, greek letters, unknown macros). Only
+    math spans ($...$ / \(...\)) go through the parser — the surrounding
+    prose is left untouched (pylatexenc would otherwise eat characters like
+    & and _ that are plain text here). On top of the parser output we apply a
+    thin display layer so the email reads well: unicode sub/superscripts
+    (CO_2 -> CO₂, 10^-3 -> 10⁻³) and primes (A' becomes the prime mark). Nothing is invented:
+    unknown LaTeX degrades to its text form.
     """
     if not text:
         return text
 
-    def _sub(match: re.Match) -> str:
-        inner = match.group(1) or match.group(2) or ""
-        out = inner
-        for cmd, uni in _LATEX_SUBS.items():
-            out = out.replace(cmd, uni)
-        # collapse stray braces
-        out = out.replace("{", "").replace("}", "")
-        out = out.replace("\\", "")
+    def _conv(match: re.Match) -> str:
+        out = _LATEX_TO_TEXT.latex_to_text(match.group(1))
+        # Thin display layer on the parser output.
+        out = re.sub(r"_\{([^{}]*)\}", lambda m: _to_subscript(m.group(1)), out)
+        out = re.sub(r"\^\{([^{}]*)\}", lambda m: _to_superscript(m.group(1)), out)
+        out = re.sub(r"_([-+]?\d+)", lambda m: _to_subscript(m.group(1)), out)
+        out = re.sub(r"\^([-+]?\d+)", lambda m: _to_superscript(m.group(1)), out)
+        out = re.sub(r"_([0-9A-Za-z])", lambda m: _to_subscript(m.group(1)), out)
+        out = re.sub(r"\^([0-9A-Za-z])", lambda m: _to_superscript(m.group(1)), out)
+        out = out.replace("'", "′")
         return out
 
-    # $...$ or \( ... \)
-    out = re.sub(r"\$(.+?)\$", lambda m: _sub(m), text)
-    out = re.sub(r"\\\((.+?)\\\)", lambda m: _sub(m), out)
+    # Chemistry subscripts first (MoS$2$ -> MoS₂, C$60$ -> C₆₀): pylatexenc
+    # would swallow the $...$ and leave a plain "2", losing the subscript
+    # intent, so we capture digit-only spans right after a letter ourselves.
+    out = re.sub(r"(?<=[A-Za-z])\$(\d{1,3})\$", lambda m: _to_subscript(m.group(1)), text)
+    # Math spans only: $...$ and \( ... \)
+    out = re.sub(r"\$([^$]+)\$", lambda m: _conv(m), out)
+    out = re.sub(r"\\\((.+?)\\\)", lambda m: _conv(m), out)
     return out
-
 
 def _clean_link(url: str | None) -> str | None:
     """Return a safe http(s) URL; None otherwise (also strips quotes/brackets)."""
@@ -432,6 +465,13 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 and idx not in others_indices
             ):
                 others_indices.append(idx)
+        # Order the whole others block by relevance (embedding score), not by
+        # pool position: rescued pool papers must slot in among the candidates
+        # they belong with, not trail at the bottom. Papers without a score
+        # go last, keeping their relative order.
+        others_indices.sort(
+            key=lambda i: (originals[i].score is None, -(originals[i].score or 0))
+        )
         others = [originals[i] for i in others_indices]
         if others:
             others_map: dict[int, dict] = {}

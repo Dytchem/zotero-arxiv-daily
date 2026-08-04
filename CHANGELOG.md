@@ -15,7 +15,10 @@ All notable changes to this project are documented here.
 - **成本优化（LLM 费用 ~$0.42 → 目标 $0.13-0.18/次）**：
   - summarize_paper 子代理 CHUNK 8000 → 16000 字符（请求数减半）+ max_tokens 4096 → 2048（输出减半）——13 次子代理调用占 agent 阶段 81% 时长，此改动时长/费用双减；
   - ROLE.md 新增 Reading budget 引导：先基于 abstract 给全池打分，深读只针对 top ~8 候选（软引导，无硬限制，agent 仍可任意深读）——避免 13 篇全量深读的过度消耗；
+  - ROLE.md 明确阅读成本纪律：长文优先 summarize_paper、inspect_paper 每篇最多 2-3 页、上下文 ~272k tokens 单价翻倍红线、others note 一句话内可省略；
   - 初始上下文核实：progressive disclosure 早已实现（pool 索引不注入，agent 用 inspect_pool/inspect_candidates 按需拉取），大头是工具结果累积，已通过上述两项控制。
+- **公式解析改用成熟库 pylatexenc**（弃用手写 LaTeX 替换表）：数学片段（$...$、\(...\)）交给 pylatexenc 解析，其上叠加薄显示层转 unicode 上下标/prime（CO_2 → CO₂、10^-3 → 10⁻³、A' → A′、MoS$2$ → MoS₂）；普通文本（含 &、_）不被误处理；`\frac{1}{2}` → `1/2`（旧手写版错误输出 `/12`）。
+- **others 区块排序修复**：rescued（从池中救回）论文此前 append 在末尾不参与排序，现统一按 embedding 相关度降序排列，与候选区融为一体。
 - 版本号 1.5.9 → 1.6.0。
 
 

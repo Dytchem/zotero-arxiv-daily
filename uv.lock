@@ -2221,7 +2221,7 @@ wheels = [
 
 [[package]]
 name = "zotero-arxiv-daily"
-version = "1.5.5"
+version = "1.5.7"
 source = { editable = "." }
 dependencies = [
     { name = "aiosmtpd" },

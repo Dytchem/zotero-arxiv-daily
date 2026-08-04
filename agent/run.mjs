@@ -447,7 +447,7 @@ function buildTools(ctx) {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model,
+              model: typeof model === "string" ? model : model?.id,
               messages: [
                 { role: "system", content: sys },
                 { role: "user", content: usr },
@@ -662,11 +662,14 @@ async function main() {
   // 从环境变量读 baseUrl 和 apiKey
   const baseUrl = process.env.OPENAI_API_BASE || "https://api.openai.com/v1";
 
-  // 创建自定义 provider
+  // 创建自定义 provider。注意 auth 必须嵌套为 { apiKey: ... }：
+  // Pi 的 checkAuth 读 provider.auth.apiKey，平铺的 envApiKeyAuth 会让
+  // auth 检查失败（"No API key found for custom"）——这是 workflow 里
+  // Pi agent 静默回退 Python harness 的根因。
   const customProvider = createProvider({
     id: "custom",
     baseUrl,
-    auth: envApiKeyAuth("API key", ["OPENAI_API_KEY"]),
+    auth: { apiKey: envApiKeyAuth("API key", ["OPENAI_API_KEY"]) },
     models: [
       {
         id: modelId,

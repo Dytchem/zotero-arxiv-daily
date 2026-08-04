@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.8] - 2026-08-04
+
+### Fixed
+- **mimo 模型被偷偷调用问题**（严重）：用户没配置过 mimo，但 OpenRouter 账单大量小 token 请求是 mimo。根因是 `ModelRuntime.create` 硬编码加载全部 builtin provider（内置 openrouter provider 的 303 模型目录含 mimo-v2.5/pro/free），用户的 OPENAI_API_KEY 对 mimo 有效 → Pi 内部辅助功能或模型 fallback 时选中 mimo。
+- **修复方案**：弃用 `agent/models.json` 硬编码 openrouter provider；改为编程式 `createProvider({ id:"custom", baseUrl: env OPENAI_API_BASE, auth: { apiKey: envApiKeyAuth("API key", ["OPENAI_API_KEY"]) }, models: [单模型], api: openAICompletionsApi() })` + `runtime.builtins.clear()` + `runtime.models.clearProviders()` → runtime 只留 custom provider 且 available 只剩用户配置的模型，杜绝 fallback 到 xiaomi/mimo 等内置模型。
+- **auth 嵌套 bug**（严重）：Pi 的 `checkAuth` 读 `provider.auth.apiKey`，平铺的 `envApiKeyAuth(...)` 会让 auth 检查失败（"No API key found for custom"），导致 Pi agent 静默回退 Python harness。auth 必须嵌套为 `{ apiKey: envApiKeyAuth(...) }`。
+- **summarize_paper model 字段 bug**：传 Pi Model 对象而非字符串 ID，改为 `model: typeof model === "string" ? model : model?.id`。
+
+### Changed
+- **Provider 安全**：现在完全从环境变量读 baseUrl 和 apiKey（`OPENAI_API_BASE` + `OPENAI_API_KEY`），不使用内置 provider catalog，避免 mimo 等模型被调用。`agent/models.json` 不再使用（保留但 runtime 不再加载它）。
+
 ## [1.5.7] - 2026-08-04
 
 ### Changed

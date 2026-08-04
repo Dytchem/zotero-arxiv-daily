@@ -83,8 +83,9 @@ Feeds ──► retrieve ──► rerank (embeddings+BM25) ──► filter ─
 ```
 src/zotero_arxiv_daily/   Python pipeline: executor, harness (legacy engine),
                           construct_email, retrievers, rerankers, notifier
-agent/                    Pi agent engine: run.mjs, ROLE.md, fetch_text.py,
-                          models.json (custom OpenRouter provider)
+agent/                    Pi agent engine: run.mjs, ROLE.md, fetch_text.py
+                          (custom provider from env vars OPENAI_API_BASE + OPENAI_API_KEY,
+                           no built-in provider catalog to avoid mimo etc.)
 config/                   base.yaml (schema) + custom.yaml (overrides)
 tests/                    195 tests, ruff-clean
 docs/HARNESS.md           generator/evaluator design

@@ -82,8 +82,9 @@ Zotero 文献库 ──► 构建画像（LLM，缓存）
 ```
 src/zotero_arxiv_daily/   Python 流水线：executor、harness（旧引擎）、
                           construct_email、retrievers、rerankers、notifier
-agent/                    Pi agent 引擎：run.mjs、ROLE.md、fetch_text.py、
-                          models.json（自定义 OpenRouter provider）
+agent/                    Pi agent 引擎：run.mjs、ROLE.md、fetch_text.py
+                          （自定义 provider 从环境变量读 OPENAI_API_BASE + OPENAI_API_KEY，
+                           不使用内置 provider catalog 以避免 mimo 等被调用）
 config/                   base.yaml（schema）+ custom.yaml（覆盖）
 tests/                    195 个测试，ruff 干净
 docs/HARNESS.md           生成器/评审器设计文档

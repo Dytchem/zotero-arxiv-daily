@@ -41,6 +41,7 @@ llm:
     min_inspections: 3 # Submit gate: papers the agent must inspect with inspect_paper before it may submit. Example: 3
     max_revisions: 2 # Evaluator rounds: how many times a 'revise' verdict re-runs the generator. Example: 2
     evaluator_enabled: true # Independent fresh-context reviewer grades the draft (approve/revise). Example: true
+    web_search_budget: 15 # Pi engine: hard cap on search_web calls per run (FREE tier is limited). Example: 15
     pi_timeout: 900 # Seconds before the Pi agent subprocess is killed (fallback to Python harness). Example: 900
 
 reranker:

@@ -178,6 +178,7 @@ llm:
     max_steps: 12                  # agent loop budget
     max_revisions: 2               # evaluator improvement rounds (python engine)
     evaluator_enabled: true        # independent reviewer on/off (python engine)
+    web_search_budget: 15          # hard cap on search_web calls per run (pi engine)
     pi_timeout: 900                # kill the Pi subprocess after N seconds
 
 email:
@@ -340,7 +341,7 @@ docs/HARNESS.md          # Generator/evaluator design document
 | `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
 | `llm.generation_kwargs` | `model`, `max_tokens` | Agent model + generation settings |
 | `llm.language` | `English` / `Chinese` | Digest language (labels + agent output) |
-| `llm.harness` | `enabled`, `engine` (`pi`/`python`), `top_k`, `full_text_budget`, `max_steps`, `max_revisions`, `evaluator_enabled`, `pi_timeout` | Agent engine + loop tuning; `full_text_budget` applies to the legacy Python harness only (the Pi agent fetches full texts itself); Pi failures fall back to the Python harness, then to embedding order |
+| `llm.harness` | `enabled`, `engine` (`pi`/`python`), `top_k`, `full_text_budget`, `max_steps`, `max_revisions`, `evaluator_enabled`, `web_search_budget`, `pi_timeout` | Agent engine + loop tuning; `full_text_budget` applies to the legacy Python harness only (the Pi agent fetches full texts itself); `max_steps` is a hard tool-call budget in the Pi engine (the SDK has no native cap); `web_search_budget` caps `search_web` calls per run; Pi failures fall back to the Python harness, then to embedding order |
 | `reranker` | `local` / `api` | Embedding backend (model, batch_size, cache_dir) |
 | `executor` | `rerank_alpha` | Hybrid weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only |
 | `executor` | `min_score`, `keywords_include`, `keywords_exclude` | Deterministic pre-agent filters |

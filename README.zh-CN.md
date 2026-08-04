@@ -178,6 +178,7 @@ llm:
     max_steps: 12                  # 智能体循环预算
     max_revisions: 2               # 评审改进轮数（python 引擎）
     evaluator_enabled: true        # 独立评审器开关（python 引擎）
+    web_search_budget: 15          # 每次运行 search_web 硬上限（pi 引擎）
     pi_timeout: 900                # Pi 子进程超时秒数
 
 email:
@@ -331,7 +332,7 @@ docs/HARNESS.md          # 生成器/评审器设计文档
 | `llm.api` | `key`、`base_url` | LLM 提供商（推荐 OpenRouter） |
 | `llm.generation_kwargs` | `model`、`max_tokens` | 智能体模型 + 生成参数 |
 | `llm.language` | `Chinese` / `English` | 邮件语言（界面标签 + 智能体输出） |
-| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`max_revisions`、`evaluator_enabled`、`pi_timeout` | 智能体引擎 + 循环调优；`full_text_budget` 只作用于旧版 Python 引擎（Pi 引擎自己抓全文）；Pi 失败时回退 Python harness，再退化向量排序 |
+| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`max_revisions`、`evaluator_enabled`、`web_search_budget`、`pi_timeout` | 智能体引擎 + 循环调优；`full_text_budget` 只作用于旧版 Python 引擎（Pi 引擎自己抓全文）；Pi 引擎里 `max_steps` 是硬性工具调用预算（SDK 无原生上限）；`web_search_budget` 限制每次运行 `search_web` 次数；Pi 失败时回退 Python harness，再退化向量排序 |
 | `reranker` | `local` / `api` | 向量后端（模型、batch_size、cache_dir） |
 | `executor` | `rerank_alpha` | 混合权重：1.0 = 纯向量，0.0 = 纯 BM25，null = 仅向量 |
 | `executor` | `min_score`、`keywords_include`、`keywords_exclude` | 智能体前的确定性过滤 |

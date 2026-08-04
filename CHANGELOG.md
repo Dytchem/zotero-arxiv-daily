@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.2] - 2026-08-04
+
+### Fixed
+- **Pi agent could fake full reads** (serious): `inspect_paper` accepted any
+  `offset`, and a huge offset returned an empty page while still marking the
+  paper as "read to the end" (`readThrough = min(offset+4000, total)` = total
+  on an empty slice) — so `finish_reading`'s 50% gate was trivially bypassed
+  without reading anything. Offsets are now clamped, offsets past the end are
+  rejected, and negative offsets (JS `slice` counts from the end) no longer
+  return garbage.
+- **No hard step budget** (serious): the Pi SDK's `createAgentSession` has no
+  `maxSteps` option, so `max_steps` was only a soft hint in the prompt — a
+  runaway agent could loop until the 900s subprocess timeout. `run.mjs` now
+  counts tool invocations itself and refuses to continue past the budget
+  (the agent must call `submit_digest`; otherwise the Python side falls back).
+- **Full-text cache could grow without limit / corrupt**: the Pi side wrote
+  `full_texts.json` with a plain `writeFileSync` (no cap, no atomicity) while
+  the Python side bounds it by `full_text_cache_max` and writes atomically.
+  The Pi side now applies the same cap and writes via tmp+rename.
+- **`search_web` had no quota**: a runaway agent could burn the FREE-tier
+  budget on trivia. New `llm.harness.web_search_budget` (default 15) hard-caps
+  `search_web` calls per run.
+- **Repeated abstract on every page**: `inspect_paper` re-sent the full
+  abstract + metadata on every page of a multi-page read (token waste). The
+  abstract now appears only on the first page (offset 0).
+
+### Changed
+- Pi agent's own tool log (stderr) is now kept at debug level on success, so
+  a `DEBUG=true` workflow run can replay what the agent actually did.
+- `inspect_candidates` / `fetch_full_text` / `search_candidates` /
+  `compare_papers` / `finish_reading` / `search_web` all honour the step
+  budget; only `submit_digest` always remains available.
+- ROLE.md documents the `search_web` hard cap; README (EN/ZH) config table
+  and example gain `web_search_budget`.
+
 ## [1.5.1] - 2026-08-04
 
 ### Fixed

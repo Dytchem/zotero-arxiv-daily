@@ -26,6 +26,7 @@ llm:
     min_inspections: 3
     max_revisions: 2
     evaluator_enabled: true
+    web_search_budget: 15
 
 source:
   arxiv:

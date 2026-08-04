@@ -61,22 +61,32 @@ function toolLog(name, params) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath, cacheDir } = ctx;
+  const { candidates, profile, language, digestPath, cacheDir, maxSteps, fullTextCacheMax, webSearchBudget } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Guarantees the agent READ the papers it recommends
   // instead of skimming titles/abstracts.
   const readDepth = new Map();
   // Structured reading notes: candidate index -> {methods, experiments,
-  // results, limitations, confidence}. The Reader→Critic→Writer pattern:
-  // notes are the mandatory intermediate artifact — scoring and
-  // recommendations must be grounded in them, and submit_digest refuses
-  // picks that have no notes (work not done).
+  // results, limitations, confidence}. Optional intermediate artifact —
+  // scoring and recommendations are expected to be grounded in these, but
+  // the digest contract itself does not require them (some papers have no
+  // accessible full text).
   const readingNotes = new Map();
   // Shared full-text disk cache (also written by the Python pipeline), so
   // texts fetched by either side are reused by the other. Located under the
   // configured cache_dir (default .cache) — same file the Python side uses.
   const fullTextCachePath = path.join(cacheDir, "full_texts.json");
+  // Hard step budget: the SDK has no maxSteps option, so we count tool
+  // invocations ourselves and refuse to continue past the budget — the
+  // agent must submit (or the run ends and the Python side falls back).
+  let stepsUsed = 0;
+  const budgetExceeded = () => stepsUsed >= maxSteps;
+  const stepMessage =
+    `Step budget exhausted (${maxSteps} steps). You must call submit_digest NOW with what you have — no more tools.`;
+  // Web-search quota: FREE tier is limited; cap per-run usage so a runaway
+  // agent cannot burn the budget on trivia.
+  let webSearchesUsed = 0;
 
   const tools = [
     {
@@ -98,6 +108,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 10, 20);
         const slice = candidates.slice(start, start + count);
@@ -131,6 +143,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         if (p.full_text) {
@@ -181,7 +195,20 @@ function buildTools(ctx) {
                 ? JSON.parse(readFileSync(cachePath, "utf8"))
                 : {};
               cache[p.url] = stdout;
-              writeFileSync(cachePath, JSON.stringify(cache), "utf8");
+              // Bound the cache like the Python side (full_text_cache_max)
+              // so it cannot grow without limit across many runs.
+              const keys = Object.keys(cache);
+              if (keys.length > fullTextCacheMax) {
+                for (const k of keys.slice(0, keys.length - fullTextCacheMax)) {
+                  delete cache[k];
+                }
+              }
+              // Atomic write (tmp + rename) so a crash mid-write cannot
+              // corrupt the shared cache the Python side also reads.
+              const tmp = `${cachePath}.${process.pid}.tmp`;
+              writeFileSync(tmp, JSON.stringify(cache), "utf8");
+              const { renameSync } = await import("node:fs");
+              renameSync(tmp, cachePath);
             } catch {
               // cache write failure is non-fatal
             }
@@ -213,6 +240,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         if (!p.full_text) {
@@ -225,7 +254,17 @@ function buildTools(ctx) {
         inspected.add(params.index);
         const full = p.full_text || "";
         const pageSize = 4000;
-        const offset = params.offset ?? 0;
+        // Clamp the offset: negative offsets (JS slice counts from the end)
+        // and offsets past the end would otherwise silently return garbage or
+        // an empty page while still marking the paper as "read to the end" —
+        // which would let the agent fake full reads. Reject them instead.
+        const offset = Number.isFinite(params.offset) && params.offset > 0 ? Math.floor(params.offset) : 0;
+        if (offset >= full.length) {
+          return textResult(
+            `offset ${offset} is past the end of #${params.index} (${full.length} chars). ` +
+              `Valid offsets: 0..${Math.max(0, full.length - 1)}.`
+          );
+        }
         const page = full.slice(offset, offset + pageSize);
         const total = full.length;
         const readThrough = Math.min(offset + pageSize, total);
@@ -233,21 +272,27 @@ function buildTools(ctx) {
           params.index,
           Math.max(readDepth.get(params.index) || 0, readThrough)
         );
+        // Abstract + metadata only on the first page — repeating them every
+        // page wastes tokens on a long multi-page read.
         const meta = [
           `#${params.index} ${p.title}`,
           `Authors: ${(p.authors || []).join(", ")}`,
           `Score: ${p.score ?? "?"} | Source: ${p.source || "?"}`,
           `URL: ${p.url}`,
-          `Abstract: ${p.abstract || "(none)"}`,
+        ];
+        if (offset === 0) {
+          meta.push(`Abstract: ${p.abstract || "(none)"}`);
+        }
+        meta.push(
           "",
           `--- full text (chars ${offset}-${Math.min(offset + pageSize, total)} of ${total}) ---`,
-          page || "(no full text available)",
-        ].join("\n");
+          page || "(no full text available)"
+        );
         const more =
           offset + pageSize < total
             ? `\n\nMORE available: call inspect_paper(index=${params.index}, offset=${offset + pageSize}) for the next page`
             : "";
-        return textResult(meta + more);
+        return textResult(meta.join("\n") + more);
       },
     },
     {
@@ -263,8 +308,17 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const q = String(params.query || "").trim();
         if (!q) return textResult("Empty query.");
+        if (webSearchesUsed >= webSearchBudget) {
+          return textResult(
+            `search_web quota exhausted (${webSearchBudget} searches this run). ` +
+              `Stop searching — judge from the papers themselves.`
+          );
+        }
+        webSearchesUsed++;
         const maxResults = Math.min(Math.max(params.max_results ?? 5, 1), 10);
         const apiKey = process.env.ANYSEARCH_API_KEY || "";
         try {
@@ -312,6 +366,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const q = (params.query || "").toLowerCase().trim();
         if (!q) return textResult("Empty query.");
         const hits = [];
@@ -339,6 +395,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const a = candidates[params.index_a];
         const b = candidates[params.index_b];
         if (!a || !b) return textResult("One of the indexes is out of range.");
@@ -364,6 +422,8 @@ function buildTools(ctx) {
       required: ["index", "methods", "experiments", "limitations", "confidence"],
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const read = readDepth.get(params.index) || 0;
@@ -510,6 +570,8 @@ async function main() {
   const modelId = input.model || DEFAULT_MODEL;
   const maxSteps = input.max_steps ?? 12;
   const cacheDir = input.cache_dir || path.join(AGENT_DIR, "..", ".cache");
+  const fullTextCacheMax = input.full_text_cache_max ?? 200;
+  const webSearchBudget = input.web_search_budget ?? 15;
   const digestPath = args.output;
 
   if (!candidates.length) {
@@ -561,6 +623,9 @@ async function main() {
     language,
     digestPath,
     cacheDir,
+    maxSteps,
+    fullTextCacheMax,
+    webSearchBudget,
   });
 
   const role = readFileSync(path.join(AGENT_DIR, "ROLE.md"), "utf8");

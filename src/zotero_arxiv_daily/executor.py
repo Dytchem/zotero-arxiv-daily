@@ -332,6 +332,8 @@ class Executor:
             "language": agent.language,
             "cache_dir": str(cache_dir),
             "max_steps": int(harness_cfg.get("max_steps", 12)),
+            "full_text_cache_max": int(self.config.executor.get("full_text_cache_max", 200)),
+            "web_search_budget": int(harness_cfg.get("web_search_budget", 15)),
             "profile": {
                 "topics": profile.topics,
                 "keywords": profile.keywords,
@@ -391,6 +393,10 @@ class Executor:
             if proc.returncode != 0:
                 logger.warning(f"Pi agent exited {proc.returncode}: {proc.stderr[-500:]}")
                 return None
+            # On success, keep the agent's own tool log (stderr) at debug level
+            # so a workflow run with DEBUG=true can replay what the agent did.
+            if proc.stderr.strip():
+                logger.debug(f"Pi agent log:\n{proc.stderr[-3000:]}")
             if not out_path.exists():
                 logger.warning("Pi agent finished without writing a digest")
                 return None

@@ -50,6 +50,7 @@ produce the daily digest:
 - `search_web` — search the web (AnySearch) to verify a paper's provenance,
   authors, venue, or any claim. Budget: FREE tier = 1,000 requests/day
   (20 QPS) with a key, lower anonymously — use a handful per run at most,
+  and the run hard-caps search_web at 15 calls (see web_search_budget).
   only when it genuinely changes your judgement.
 - `compare_papers` — side-by-side view of two candidates.
 - `finish_reading` — optional: record structured notes for a paper you read.

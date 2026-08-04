@@ -26,8 +26,8 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 1. **Learns your taste** from your Zotero library — topics, methods, and the *quality bar* you actually read at.
 2. **Pulls the newest papers** from arXiv, bioRxiv and medRxiv.
 3. **Shortlists candidates** with fast deterministic math (embeddings + BM25 + recency).
-4. **Lets an autonomous agent decide** — it browses the *full pool* of today's papers (not just the pre-filtered list), fetches full texts itself, reads them page by page (delegating long papers to a sub-agent), verifies provenance online, and scores each paper's *work quality* (0–10).
-5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Work** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped.
+4. **Lets an autonomous agent decide** — it browses the *full pool* of today's papers (not just the pre-filtered list), fetches full texts itself, reads them (delegating long papers to a sub-agent), verifies provenance online, and scores each paper's **Recommendation** (0–10).
+5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Recommendation** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped.
 
 **The math ranks; the agent decides.** Embedding scores are hints, not verdicts.
 
@@ -35,9 +35,10 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 
 - **Pi agent engine** (`agent/run.mjs` + `agent/ROLE.md`) — a real coding agent with its own tools: `inspect_candidates`, `inspect_pool`, `fetch_full_text`, `inspect_paper` (paged), `summarize_paper` (sub-agent for long papers), `search_web`, `search_candidates`, `compare_papers`, `finish_reading`, `submit_digest`. It decides what to read, fetches and reads the papers itself, and grounds every recommendation in the actual content.
 - **Full-pool visibility** — the agent sees every deduplicated paper from today's fetch, including ones the keyword/min-score/max-count filters dropped. A high-value paper that the heuristics missed can still be rescued, read and recommended — and it shows up in the email with a "pool" note.
-- **Work-quality scoring** — every candidate (picked or not) gets a **Work** badge (0–10) judging rigour, novelty and provenance. Watery/低质 papers are called out even when they look on-topic.
+- **Recommendation scoring** — every candidate (picked or not) gets a **Recommendation** badge (0–10) judging rigour, novelty and provenance. Weak papers are called out even when they look on-topic.
 - **Defensible ordering** — stronger work first; the reader can compare the badges.
 - **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended. Long papers are delegated to a sub-agent so nothing is skipped.
+- **Cost-conscious by design** — the agent scores the whole pool from abstracts first and deep-reads only the shortlist (~8 papers), so a daily run costs well under $0.20; long-paper sub-agent reads chunk 16k chars per request. No hard limits — the agent can always read more if it needs to.
 - **Safe rendering** — every text field HTML-escaped, LaTeX→Unicode, links whitelisted. The agent writes JSON, never markup.
 - **Provider-safe by design** — the LLM provider is created programmatically from `OPENAI_API_BASE` + `OPENAI_API_KEY` with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.
 - **Graceful degradation** — Pi failure → Python harness → embedding-order digest. The email always goes out.
@@ -73,7 +74,7 @@ Feeds ──► retrieve ──► rerank (embeddings+BM25) ──► filter ─
                       │  Pi agent (Node, agent/run.mjs + ROLE.md)               │
                       │  sees the FULL pool (candidates + filtered-out papers)  │
                       │  fetches full texts itself, pages through,              │
-                      │  scores Work 0–10, submits digest JSON                  │
+                      │  scores Recommendation 0–10, submits digest JSON        │
                       └──────────────────────────────────────────┬─────────────┘
                       (fallback: Python HarnessAgent → embedding order)
                                                                  ▼

@@ -75,7 +75,7 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath, cacheDir, maxSteps, fullTextCacheMax, webSearchBudget } = ctx;
+  const { candidates, profile, language, digestPath, cacheDir, maxSteps, fullTextCacheMax, webSearchBudget, model } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Guarantees the agent READ the papers it recommends
@@ -114,10 +114,10 @@ function buildTools(ctx) {
           description: "0-based start index",
         }),
         count: Type.Integer({
-          default: 10,
+          default: 20,
           minimum: 1,
-          maximum: 20,
-          description: "how many to show (max 20)",
+          maximum: 50,
+          description: "how many to show (max 50)",
         }),
       }),
       execute: async (_toolCallId, params) => {
@@ -125,7 +125,7 @@ function buildTools(ctx) {
         if (budgetExceeded()) return textResult(stepMessage);
         stepsUsed++;
         const start = params.start ?? 0;
-        const count = Math.min(params.count ?? 10, 20);
+        const count = Math.min(params.count ?? 20, 50);
         const slice = candidates.slice(start, start + count);
         const lines = slice.map((p, i) => {
           const idx = start + i;
@@ -244,7 +244,7 @@ function buildTools(ctx) {
       name: "inspect_paper",
       label: "Inspect paper",
       description:
-        "Read one candidate paper by its index: authors, affiliations when available, abstract, and a WINDOW of the full text. The full text is long — this returns one page (4000 chars from offset) with a progress note. Keep calling with a larger offset to read the next page until you understand the methods, experiments and results. Reading only the first page is not enough to judge a paper's quality.",
+        "Read one candidate paper by its index: authors, affiliations when available, abstract, and a WINDOW of the full text. The full text is long — this returns one page (8000 chars from offset) with a progress note. Keep calling with a larger offset to read the next page until you understand the methods, experiments and results. Reading only the first page is not enough to judge a paper's quality. For VERY long papers you can delegate reading to a sub-agent via summarize_paper instead of paging through everything.",
       parameters: Type.Object({
         index: Type.Integer({ description: "candidate index" }),
         offset: Type.Integer({
@@ -267,7 +267,7 @@ function buildTools(ctx) {
         }
         inspected.add(params.index);
         const full = p.full_text || "";
-        const pageSize = 4000;
+        const pageSize = 8000;
         // Clamp the offset: negative offsets (JS slice counts from the end)
         // and offsets past the end would otherwise silently return garbage or
         // an empty page while still marking the paper as "read to the end" —
@@ -420,10 +420,72 @@ function buildTools(ctx) {
       },
     },
     {
+      name: "summarize_paper",
+      label: "Summarize a long paper (sub-agent)",
+      description:
+        "For a LONG paper, delegate reading to a sub-agent: it chunks the full text, summarizes each chunk (methods / experiments / results / limitations), and returns consolidated notes — without flooding your context with the whole text. Use this when a paper is very long and you need the gist before deciding; then inspect_paper specific offsets for details you want verbatim.",
+      parameters: Type.Object({
+        index: Type.Integer({ description: "candidate index" }),
+        focus: Type.Optional(
+          Type.String({ description: "optional focus, e.g. 'the nonadiabatic method' or 'the main numerical result'" })
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        toolLog("TOOL", params);
+        if (budgetExceeded()) return textResult(stepMessage);
+        stepsUsed++;
+        const p = candidates[params.index];
+        if (!p) return textResult(`No candidate at index ${params.index}`);
+        const full = p.full_text || "";
+        if (!full) {
+          return textResult(
+            `#${params.index} has no full text loaded yet. Call fetch_full_text(index=${params.index}) first.`
+          );
+        }
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) return textResult("OPENAI_API_KEY not set; cannot run sub-agent. Use inspect_paper instead.");
+        const CHUNK = 8000;
+        const chunks = [];
+        for (let i = 0; i < full.length; i += CHUNK) chunks.push(full.slice(i, i + CHUNK));
+        const baseUrl = (process.env.OPENAI_API_BASE || "https://openrouter.ai/api/v1").replace(/\/$/, "");
+        const notes = [];
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const sys =
+            "You are a meticulous research librarian. Given a chunk of a paper's full text, extract: METHODS (specific techniques), EXPERIMENTS/RESULTS (specific numbers/systems/findings), LIMITATIONS, and a ONE-LINE takeaway. Be concrete and grounded in the text; do not invent. Reply in the digest language.";
+          const usr = `Paper: ${p.title}\n${params.focus ? `Focus: ${params.focus}\n` : ""}Chunk ${ci + 1}/${chunks.length}\n${chunks[ci]}`;
+          const resp = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: "system", content: sys },
+                { role: "user", content: usr },
+              ],
+              max_tokens: 700,
+            }),
+            signal: AbortSignal.timeout(60000),
+          });
+          if (!resp.ok) {
+            return textResult(
+              `Sub-agent summary failed at chunk ${ci + 1}: HTTP ${resp.status} ${(await resp.text()).slice(0, 150)}. Use inspect_paper instead.`
+            );
+          }
+          const data = await resp.json();
+          const text = data.choices?.[0]?.message?.content || "(empty)";
+          notes.push(`--- chunk ${ci + 1}/${chunks.length} ---\n${text}`);
+        }
+        return textResult(
+          `Sub-agent reading of #${params.index} (${p.title}, ${full.length} chars → ${chunks.length} chunks):\n\n` +
+            notes.join("\n\n")
+        );
+      },
+    },
+    {
       name: "finish_reading",
       label: "Finish reading (record notes)",
       description:
-        "After you have READ a paper (via inspect_paper, multiple pages), record your structured reading notes: what methods it uses, what experiments/results it reports, its limitations, and how confident you are in your assessment. This anchors your work_score and recommendation reason in what you actually read. Call it once per paper you seriously consider — it is strongly recommended, though the digest contract itself does not require it (some papers may have no accessible full text).",
+        "After you have READ a paper (via inspect_paper or summarize_paper), record your structured reading notes: what methods it uses, what experiments/results it reports, its limitations, and how confident you are in your assessment. This anchors your work_score and recommendation reason in what you actually read. Call it once per paper you seriously consider — it is strongly recommended, though the digest contract itself does not require it (some papers may have no accessible full text).",
       parameters: Type.Object({
         index: Type.Integer({ description: "candidate index" }),
         methods: Type.String({ description: "the methods/techniques the paper uses (from the full text, be specific)" }),
@@ -442,11 +504,14 @@ function buildTools(ctx) {
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const read = readDepth.get(params.index) || 0;
         const total = (p.full_text || "").length;
-        if (total > 0 && read < total * 0.5) {
+        // Soft nudge, not a hard gate: a paper read via summarize_paper may have
+        // a small readDepth (paged reads) but the sub-agent covered the whole
+        // text — so only warn when NOTHING was read at all.
+        if (total > 0 && read === 0 && !readingNotes.has(params.index)) {
           return textResult(
-            `You have only read ${read}/${total} chars of #${params.index}. ` +
-              `finish_reading is for papers you have actually read — ` +
-              `call inspect_paper(index=${params.index}, offset=${Math.max(0, read)}) first.`
+            `You have not read #${params.index} yet (0/${total} chars via inspect_paper). ` +
+              `Read it first with inspect_paper (or summarize_paper for very long papers) — ` +
+              `notes must be grounded in the actual content.`
           );
         }
         if (String(params.methods || "").trim().length < 20) {
@@ -582,7 +647,7 @@ async function main() {
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
-  const maxSteps = input.max_steps ?? 100;
+  const maxSteps = input.max_steps ?? 300;
   const cacheDir = input.cache_dir || path.join(AGENT_DIR, "..", ".cache");
   const fullTextCacheMax = input.full_text_cache_max ?? 200;
   const webSearchBudget = input.web_search_budget ?? 15;
@@ -640,16 +705,18 @@ async function main() {
     maxSteps,
     fullTextCacheMax,
     webSearchBudget,
+    model,
   });
 
   const role = readFileSync(path.join(AGENT_DIR, "ROLE.md"), "utf8");
 
+  const thinkingLevel = input.thinking_level || "max";
   const { session } = await createAgentSession({
     cwd: path.join(AGENT_DIR, ".."),
     agentDir: AGENT_DIR,
     modelRuntime: runtime,
     model,
-    thinkingLevel: "medium",
+    thinkingLevel,
     // The agent is a REAL coding agent: it keeps the built-in bash/read
     // tools so it can inspect the repo, check caches, and fetch/read
     // papers itself with the command line. Only destructive write tools

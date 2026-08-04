@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.5] - 2026-08-04
+
+### Added
+- **Sub-agent long-paper reading** (`summarize_paper`): when a paper is very
+  long, the Pi agent can delegate reading to a sub-agent that chunks the
+  full text and returns structured notes per chunk (methods / experiments /
+  results / limitations) — no context flooding. The agent can then
+  `inspect_paper` specific offsets verbatim. This is the missing "sub-agent"
+  capability: full agentic freedom to read arbitrarily long papers.
+- `llm.harness.thinking_level` (default `max`): reasoning effort for the Pi
+  engine (minimal/low/medium/high/xhigh/max). `max` = most thorough.
+
+### Changed
+- `llm.harness.max_steps` default **100 → 300**: the agent counts its own
+  tool invocations; 100 was still too tight for reading several full papers
+  AND searching. 300 is a hard safety cap, not a target.
+- `pi_timeout` default 900 → 1800s (300 steps + max thinking needs headroom).
+- `inspect_paper` page size 4000 → 8000 chars (fewer calls per paper).
+- `inspect_candidates` page size max 20 → 50 (see more candidates per call).
+- `finish_reading` 50%-read gate → soft nudge (a paper read via
+  `summarize_paper` has small readDepth but the sub-agent covered it all;
+  only a zero-read paper is rejected).
+- ROLE.md: "When NOT to submit an empty digest" — empty is valid only after
+  actually doing the work; skimming one page per paper and quitting is a
+  budget problem, not a quality verdict. Long papers: delegate to the
+  sub-agent instead of flooding context.
+
 ## [1.5.4] - 2026-08-04
 
 ### Fixed

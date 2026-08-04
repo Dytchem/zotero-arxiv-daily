@@ -331,7 +331,8 @@ class Executor:
             "model": agent.model,
             "language": agent.language,
             "cache_dir": str(cache_dir),
-            "max_steps": int(harness_cfg.get("max_steps", 12)),
+            "max_steps": int(harness_cfg.get("max_steps", 300)),
+            "thinking_level": harness_cfg.get("thinking_level", "max"),
             "full_text_cache_max": int(self.config.executor.get("full_text_cache_max", 200)),
             "web_search_budget": int(harness_cfg.get("web_search_budget", 15)),
             "profile": {

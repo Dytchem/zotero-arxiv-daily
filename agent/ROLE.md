@@ -51,6 +51,14 @@ That is not acceptable.
   (`chars X-Y of TOTAL` with no MORE note), or at minimum read far enough to
   cover methods + results (typically 3–5 pages). One page is a teaser, not a
   read. If a paper is short enough, read it all.
+- **Long papers: delegate to a sub-agent.** When a paper is very long
+  (dozens of pages / tens of thousands of chars), do NOT page through all of
+  it yourself — that floods your context. Call `summarize_paper` (optional
+  `focus`, e.g. the method or the main result): it chunks the full text and
+  returns structured notes per chunk (methods / experiments / results /
+  limitations) without the raw text. Then `inspect_paper` the specific
+  offsets you need verbatim. This is exactly what a careful researcher does:
+  delegate the bulk reading, keep the evidence.
 - **Depth beats breadth.** Prefer deep-reading 2–4 candidates over
   superficial looks at 10. A digest built on 3 fully-read papers beats one
   built on 8 half-read titles.
@@ -64,6 +72,18 @@ That is not acceptable.
   deserves a `search_web` provenance check unless you already know the
   group/venue. Unknown authors + high score without verification is how
   predatory or overclaimed work sneaks in.
+
+## When NOT to submit an empty digest
+
+"Nothing worth recommending" is a valid answer ONLY when you actually did
+the work and the batch genuinely had nothing. It is NOT valid when you just
+skimmed titles, read one page each, or stopped early because a paper was
+long — those are budget problems, not quality problems. If you have not
+covered a paper's methods and results, finish reading (or delegate to
+`summarize_paper`) before judging it. An honest digest with 1–3
+well-read picks beats an empty one from a lazy skim — and the reader
+prefers a real recommendation with its evidence to no recommendation at
+all.
 
 ## Your tools
 

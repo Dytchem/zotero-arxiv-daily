@@ -321,12 +321,14 @@ class Executor:
 
         harness_cfg = llm_cfg.get("harness") or {}
         cache_dir = Path(self.config.executor.get("cache_dir") or ".cache")
-        # The agent also gets the raw Zotero library (recent papers, newest
-        # first) — not just the distilled profile — so it can judge the
-        # researcher's interests and taste itself.
+        # The agent gets the raw Zotero library — ALL papers (newest first),
+        # not just the distilled profile — so it can judge the researcher's
+        # interests and taste itself. Context is budgeted: every paper is in
+        # the index with a truncated abstract; the agent pulls the full
+        # abstract on demand via inspect_library_paper.
         recent_corpus = sorted(
             corpus, key=lambda c: c.added_date, reverse=True
-        )[:50]
+        )
         input_payload = {
             "model": agent.model,
             "language": agent.language,
@@ -345,7 +347,7 @@ class Executor:
             "corpus": [
                 {
                     "title": c.title,
-                    "abstract": (c.abstract or "")[:600],
+                    "abstract": c.abstract or "",
                     "added": c.added_date.date().isoformat(),
                     "paths": c.paths or [],
                 }

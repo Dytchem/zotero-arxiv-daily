@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.7] - 2026-08-04
+
+### Changed
+- **Progressive disclosure for the Zotero library**: the agent now gets ALL
+  library papers (no more 50-paper cap) but with truncated abstracts in the
+  initial context — a lean index. A new `inspect_library_paper(<index>)`
+  tool returns any paper's FULL abstract + collection paths on demand.
+  Context stays budgeted while nothing is hidden: the agent decides what to
+  expand, matching the progressive-disclosure best practice (Anthropic /
+  LangChain context-engineering guidance: keep an index in context, pull
+  details when needed, avoid loading everything "just in case").
+
+## [1.5.6] - 2026-08-04
+
+### Changed
+- **All hard limits removed** (owner decision): the Pi agent runs free — no
+  step budget (`max_steps` no longer enforced), no `search_web` quota. The
+  only remaining safety valve is `pi_timeout` on the subprocess (1800s).
+  Initial prompt now says "No step limit: keep reading and searching until
+  you have enough to judge the batch well."
+- `thinking_level` default `max` (reasoning effort), passed through to the
+  Pi engine.
+
 ## [1.5.5] - 2026-08-04
 
 ### Added

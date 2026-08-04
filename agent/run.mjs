@@ -75,7 +75,7 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath, cacheDir, fullTextCacheMax, model } = ctx;
+  const { candidates, profile, language, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Used for the soft finish_reading nudge.
@@ -92,6 +92,28 @@ function buildTools(ctx) {
   const fullTextCachePath = path.join(cacheDir, "full_texts.json");
 
   const tools = [
+    {
+      name: "inspect_library_paper",
+      label: "Inspect a library paper",
+      description:
+        "Read the FULL abstract of one paper from the researcher's Zotero library (by its index in the library list above). The initial list shows truncated abstracts to save context — call this when you need a paper's complete abstract to judge relevance or taste. Returns full abstract + collection paths.",
+      parameters: Type.Object({
+        index: Type.Integer({ description: "index into the Zotero library list (1-based as shown)" }),
+      }),
+      execute: async (_toolCallId, params) => {
+        toolLog("TOOL", params);
+        const lib = library || [];
+        const idx = params.index - 1;
+        const c = lib[idx];
+        if (!c) return textResult(`No library paper at index ${params.index} (library has ${lib.length} papers).`);
+        return textResult(
+          `[${params.index}] ${c.title}\n` +
+            `Added: ${c.added || "?"}\n` +
+            `Paths: ${(c.paths || []).join(", ") || "-"}\n` +
+            `Full abstract:\n${c.abstract || "(no abstract)"}`
+        );
+      },
+    },
     {
       name: "inspect_candidates",
       label: "Inspect candidates",
@@ -648,15 +670,15 @@ async function main() {
     .filter(Boolean)
     .join("\n");
 
-  // Raw Zotero library (recent papers, newest first) — the agent sees the
-  // researcher's actual library, not just the distilled profile, so it can
-  // judge interests and taste itself.
+  // Raw Zotero library — ALL papers (newest first), truncated abstracts as an
+  // index. The agent pulls the full abstract of any library paper on demand
+  // via inspect_library_paper, so context stays lean while nothing is hidden.
   const corpusText = (input.corpus || [])
     .map(
       (c, i) =>
         `${i + 1}. [${c.added || "?"}] ${c.title}\n` +
         `   Paths: ${(c.paths || []).join(", ") || "-"}\n` +
-        `   Abstract: ${(c.abstract || "").slice(0, 300)}`
+        `   Abstract: ${(c.abstract || "").slice(0, 300)}${(c.abstract || "").length > 300 ? "…" : ""}`
     )
     .join("\n");
 
@@ -668,6 +690,7 @@ async function main() {
     cacheDir,
     fullTextCacheMax,
     model,
+    library: input.corpus || [],
   });
 
   const role = readFileSync(path.join(AGENT_DIR, "ROLE.md"), "utf8");
@@ -694,7 +717,7 @@ async function main() {
     "## Inputs",
     `Research profile:\n${profileText}`,
     corpusText
-      ? `Zotero library (recent ${(input.corpus || []).length} papers, newest first — this is the researcher's actual library; use it to calibrate what they care about):\n${corpusText}`
+      ? `Zotero library (all ${(input.corpus || []).length} papers, newest first — the researcher's actual library; use it to calibrate what they care about). Abstracts are truncated to keep context lean: call inspect_library_paper(<index>) for any paper's FULL abstract and paths:\n${corpusText}`
       : "",
     `Language: write the digest in ${language}.`,
     `Candidates: ${candidates.length} paper(s) available. The full texts are NOT preloaded — you fetch what you want to read, with fetch_full_text or bash.`,

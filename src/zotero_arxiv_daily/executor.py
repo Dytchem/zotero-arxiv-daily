@@ -340,9 +340,15 @@ class Executor:
                     "abstract": p.abstract or "",
                     "url": p.url,
                     "pdf_url": p.pdf_url,
+                    "source_url": p.source_url,
                     "score": p.score,
                     "source": p.source,
-                    "full_text": p.full_text or "",
+                    # The Pi agent fetches full text ITSELF (fetch_full_text
+                    # tool → agent/fetch_text.py). We deliberately do NOT
+                    # preload full_text here: the agent decides what to read.
+                    # The disk cache (full_texts.json) is shared, so anything
+                    # already fetched by the Python side is available to it.
+                    "full_text": "",
                 }
                 for i, p in enumerate(candidates)
             ],
@@ -575,8 +581,13 @@ class Executor:
             ranked = self._filter_sent_history(ranked)
             ranked = ranked[: int(self.config.executor.get("max_paper_num", 100))]
             # Best-effort fetch full text for top candidates before the agent runs,
-            # so its inspect_paper tool has something to show.
-            self._maybe_fetch_full_texts(ranked)
+            # so its inspect_paper tool has something to show. The Pi engine
+            # fetches full texts ITSELF (fetch_full_text tool / bash) — the
+            # agent decides what to read, so we only prefetch for the legacy
+            # Python harness.
+            engine = (self.config.llm.get("harness") or {}).get("engine", "pi")
+            if engine != "pi":
+                self._maybe_fetch_full_texts(ranked)
 
         if not ranked and not self.config.executor.send_empty:
             logger.info("No qualifying papers found. No email will be sent.")

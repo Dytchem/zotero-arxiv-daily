@@ -16,7 +16,7 @@
 // no OPENROUTER_API_KEY — the built-in openrouter provider reads that var and
 // would find nothing, so we define our own.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -118,6 +118,84 @@ function buildTools(ctx) {
       },
     },
     {
+      name: "fetch_full_text",
+      label: "Fetch full text",
+      description:
+        "Download and extract the full text of a candidate paper (by index) using the command line. The pipeline does NOT preload full texts — you decide what to read and fetch it yourself. Returns the extracted text (or a cache hit) and lets you then read it page by page with inspect_paper. Papers with no accessible full text return an error; you may still judge them from the abstract with lower confidence.",
+      parameters: Type.Object({
+        index: Type.Integer({ description: "candidate index" }),
+      }),
+      execute: async (_toolCallId, params) => {
+        toolLog("TOOL", params);
+        const p = candidates[params.index];
+        if (!p) return textResult(`No candidate at index ${params.index}`);
+        if (p.full_text) {
+          return textResult(
+            `Already fetched (${p.full_text.length} chars). Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
+          );
+        }
+        const cachePath = path.join(AGENT_DIR, "..", ".cache", "full_texts.json");
+        // Reuse the shared disk cache first (the Python side may have prefetched).
+        try {
+          if (existsSync(cachePath)) {
+            const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+            const cached = cache[p.url];
+            if (typeof cached === "string" && cached.length > 0) {
+              p.full_text = cached;
+              return textResult(
+                `Loaded ${cached.length} chars for #${params.index} from cache. Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
+              );
+            }
+          }
+        } catch {
+          // cache read failure is non-fatal — fetch fresh below
+        }
+        const { execFile } = await import("node:child_process");
+        const { promisify } = await import("node:util");
+        const execFileP = promisify(execFile);
+        try {
+          const { stdout, stderr } = await execFileP(
+            "uv",
+            [
+              "run",
+              "python",
+              path.join(AGENT_DIR, "fetch_text.py"),
+              p.url,
+              p.pdf_url || "",
+              p.source_url || "",
+            ],
+            {
+              cwd: path.join(AGENT_DIR, ".."),
+              timeout: 240000,
+              maxBuffer: 64 * 1024 * 1024,
+            }
+          );
+          if (stdout && stdout.trim()) {
+            p.full_text = stdout;
+            try {
+              const cache = existsSync(cachePath)
+                ? JSON.parse(readFileSync(cachePath, "utf8"))
+                : {};
+              cache[p.url] = stdout;
+              writeFileSync(cachePath, JSON.stringify(cache), "utf8");
+            } catch {
+              // cache write failure is non-fatal
+            }
+            return textResult(
+              `Fetched ${stdout.length} chars for #${params.index}. Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
+            );
+          }
+          return textResult(
+            `No full text available for #${params.index} (${p.title}). stderr: ${(stderr || "").slice(0, 200)}. You may judge it from the abstract with lower confidence.`
+          );
+        } catch (err) {
+          return textResult(
+            `Fetch failed for #${params.index}: ${String(err.message || err).slice(0, 300)}. You may judge it from the abstract with lower confidence.`
+          );
+        }
+      },
+    },
+    {
       name: "inspect_paper",
       label: "Inspect paper",
       description:
@@ -133,6 +211,13 @@ function buildTools(ctx) {
         toolLog("TOOL", params);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
+        if (!p.full_text) {
+          return textResult(
+            `#${params.index} (${p.title}) has no full text loaded yet. ` +
+              `Call fetch_full_text(index=${params.index}) first to download and ` +
+              `extract it (or use bash yourself), then inspect_paper again.`
+          );
+        }
         inspected.add(params.index);
         const full = p.full_text || "";
         const pageSize = 4000;
@@ -445,7 +530,11 @@ async function main() {
     modelRuntime: runtime,
     model,
     thinkingLevel: "medium",
-    noTools: "builtin",
+    // The agent is a REAL coding agent: it keeps the built-in bash/read
+    // tools so it can inspect the repo, check caches, and fetch/read
+    // papers itself with the command line. Only destructive write tools
+    // are disabled.
+    excludeTools: ["edit", "write"],
     customTools: tools,
     sessionManager: SessionManager.inMemory(),
   });
@@ -459,7 +548,7 @@ async function main() {
     `Candidates: ${candidates.length} paper(s) available. Inspect them with the provided tools.`,
     "",
     "## Required pipeline (Reader → Critic → Writer)",
-    "1. READER: survey ALL candidates (page through inspect_candidates), then deep-read the serious ones with inspect_paper (multiple pages — at least 60% of each recommended paper's full text). After finishing each paper, call finish_reading to record structured notes (methods / experiments / limitations / confidence). Notes are MANDATORY evidence — submit_digest refuses recommendations without them.",
+    "1. READER: survey ALL candidates (page through inspect_candidates), then decide for YOURSELF which papers deserve a deep read. Full texts are NOT preloaded — you are the agent, so fetch them yourself: call fetch_full_text(index) (or use the bash tool to download/extract) for each paper you seriously consider, then read it with inspect_paper (multiple pages — at least 60% of each recommended paper's full text). After finishing each paper, call finish_reading to record structured notes (methods / experiments / limitations / confidence). Notes are MANDATORY evidence — submit_digest refuses recommendations without them.",
     "2. CRITIC: assign every candidate a work_score (0-10) grounded in your notes — one consistent rubric across all papers; every unpicked candidate also needs a work_score in the others array (no exceptions).",
     "3. WRITER: order papers primarily by work_score DESCENDING (ties by relevance, then taste); write reasons that cite the specific methods/experiments/results you actually read — never a generic abstract paraphrase; cover the unpicked candidates with others_summary + per-paper scores.",
     "",

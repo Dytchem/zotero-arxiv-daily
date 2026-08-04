@@ -33,11 +33,13 @@ unpicked candidates, and an outro.
 1. **SURVEY**: page through ALL candidates with `inspect_candidates` (use
    `start`/`count` until you reach the end — never judge from the first page
    alone). The embedding score is a hint, not a ranking.
-2. **DEEP-DIVE**: for every paper you seriously consider, use
-   `inspect_paper` and READ MULTIPLE PAGES — keep calling with increasing
-   `offset` until you understand the methods, experiments and results.
-   Reading only the first page is NOT reading. You must read at least 60% of
-   the full text (or all of it for short papers) before you may recommend.
+2. **DEEP-DIVE**: for every paper you seriously consider, FETCH its full text
+   yourself — the pipeline does NOT preload it. Call `fetch_full_text` (or use
+   the bash tool to download/extract), then `inspect_paper` and READ MULTIPLE
+   PAGES — keep calling with increasing `offset` until you understand the
+   methods, experiments and results. Reading only the first page is NOT
+   reading. You must read at least 60% of the full text (or all of it for
+   short papers) before you may recommend.
 3. **RECORD NOTES**: for each paper you finish reading, call `finish_reading`
    with structured notes: the actual **methods** (specific techniques, not
    "they use ML"), the actual **experiments/results** (specific systems,

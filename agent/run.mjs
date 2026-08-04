@@ -61,7 +61,7 @@ function toolLog(name, params) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, minInspections, digestPath } = ctx;
+  const { candidates, profile, language, digestPath } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Guarantees the agent READ the papers it recommends
@@ -378,53 +378,8 @@ function buildTools(ctx) {
       required: ["subject", "intro", "papers", "outro"],
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (inspected.size < minInspections) {
-          return textResult(
-            `You have only inspected ${inspected.size} paper(s) with inspect_paper; ` +
-              `the minimum is ${minInspections}. Keep working and call submit_digest again.`
-          );
-        }
-        // Hard gate: every RECOMMENDED paper must have been actually READ in
-        // depth — not just skimmed by title/abstract. We require the agent to
-        // have read through at least 60% of the full text (or all of it when
-        // the paper is short). This prevents recommending papers the agent
-        // never read properly.
-        const MIN_READ_FRACTION = 0.6;
-        const unreadPicks = [];
-        for (const pick of params.papers || []) {
-          const cand = candidates[pick.index];
-          if (!cand) continue;
-          const total = (cand.full_text || "").length;
-          if (total <= 0) continue; // no full text available — cannot verify depth
-          const read = readDepth.get(pick.index) || 0;
-          if (read < total * MIN_READ_FRACTION) {
-            unreadPicks.push(
-              `#${pick.index} (${cand.title}): read ${read}/${total} chars — ` +
-                `call inspect_paper(index=${pick.index}, offset=${Math.max(0, read)}) ` +
-                `and keep paging until you have read at least ${Math.ceil(total * MIN_READ_FRACTION)} chars`
-            );
-          }
-        }
-        if (unreadPicks.length) {
-          return textResult(
-            "You cannot recommend papers you have not read in depth. Finish reading them first:\n" +
-              unreadPicks.join("\n")
-          );
-        }
-        // Hard gate: every RECOMMENDED paper must have structured reading
-        // notes (the Reader→Critic→Writer contract). Notes are the evidence
-        // that real work happened — no notes, no recommendation.
-        const unNotedPicks = (params.papers || []).filter(
-          (pick) => !readingNotes.has(pick.index)
-        );
-        if (unNotedPicks.length) {
-          return textResult(
-            "Every recommended paper needs structured reading notes (finish_reading). " +
-              "Missing notes for: " +
-              unNotedPicks.map((p) => `#${p.index}`).join(", ") +
-              ". Call finish_reading for each, then resubmit."
-          );
-        }
+        // Data-contract checks only (the email renderer needs these fields);
+        // how the agent got there is its own business.
         const picked = new Set((params.papers || []).map((p) => p.index));
         const unpicked = [];
         for (let i = 0; i < candidates.length; i++) {
@@ -479,7 +434,6 @@ async function main() {
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
-  const minInspections = input.min_inspections ?? 3;
   const maxSteps = input.max_steps ?? 12;
   const digestPath = args.output;
 
@@ -518,7 +472,6 @@ async function main() {
     candidates,
     profile,
     language,
-    minInspections,
     digestPath,
   });
 
@@ -545,17 +498,11 @@ async function main() {
     "## Inputs",
     `Research profile:\n${profileText}`,
     `Language: write the digest in ${language}.`,
-    `Candidates: ${candidates.length} paper(s) available. Inspect them with the provided tools.`,
+    `Candidates: ${candidates.length} paper(s) available. The full texts are NOT preloaded — you fetch what you want to read, with fetch_full_text or bash.`,
     "",
-    "## Required pipeline (Reader → Critic → Writer)",
-    "1. READER: survey ALL candidates (page through inspect_candidates), then decide for YOURSELF which papers deserve a deep read. Full texts are NOT preloaded — you are the agent, so fetch them yourself: call fetch_full_text(index) (or use the bash tool to download/extract) for each paper you seriously consider, then read it with inspect_paper (multiple pages — at least 60% of each recommended paper's full text). After finishing each paper, call finish_reading to record structured notes (methods / experiments / limitations / confidence). Notes are MANDATORY evidence — submit_digest refuses recommendations without them.",
-    "2. CRITIC: assign every candidate a work_score (0-10) grounded in your notes — one consistent rubric across all papers; every unpicked candidate also needs a work_score in the others array (no exceptions).",
-    "3. WRITER: order papers primarily by work_score DESCENDING (ties by relevance, then taste); write reasons that cite the specific methods/experiments/results you actually read — never a generic abstract paraphrase; cover the unpicked candidates with others_summary + per-paper scores.",
-    "",
-    "## Rules",
-    `Quality bar: reasons MUST cite concrete methods, experiments, or results from the full text you actually read. Do not recommend a paper you have not inspected with inspect_paper and recorded notes for.`,
-    `Papers order in the papers array IS the email card order: sort primarily by work_score DESCENDING (ties by relevance, then taste).`,
+    "## Constraints",
     `Never refer to papers by candidate index numbers in the intro/reasons/outro — use titles.`,
+    `The papers array order IS the email card order — stronger work first.`,
     `You have up to ${maxSteps} tool-call steps. When done, call submit_digest.`,
   ].join("\n\n");
 

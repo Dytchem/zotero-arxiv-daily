@@ -1,388 +1,96 @@
 <p align="center">
-  <img width="160" height="160" src="assets/logo.svg" alt="Zotero-arXiv-Daily logo">
+  <img width="140" height="140" src="assets/logo.svg" alt="Zotero-arXiv-Daily logo">
 </p>
 
 <h1 align="center">Zotero-arXiv-Daily</h1>
 
 <p align="center">
-  <em>你的专属 AI 学术图书管理员 —— 读懂你的 Zotero 文献库，每天替你追踪 arXiv 新论文，像一位有经验的资深研究者那样，为你挑出值得读的论文。</em>
+  <em>你的 AI 学术管家 —— 读你的 Zotero 文献库，每天扫描 arXiv/bioRxiv/medRxiv，用真正的编辑判断力推荐文章。</em>
 </p>
 
 <p align="center">
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
-  <a href="https://github.com/Dytchem/zotero-arxiv-daily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Dytchem/zotero-arxiv-daily?style=flat-square" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-191-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-195-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
-<p align="center">
-  <a href="README.md">🌐 English</a>
-</p>
+<p align="center"><a href="README.md">English</a></p>
 
 ---
 
-## 目录
+## 它做什么
 
-- [这是什么？](#-这是什么)
-- [工作原理](#-工作原理)
-- [功能特性](#-功能特性)
-- [快速开始](#-快速开始)
-- [邮件结构](#-邮件结构)
-- [架构](#-架构)
-- [项目结构](#-项目结构)
-- [配置参考](#-配置参考)
-- [测试](#-测试)
-- [常见问题](#-常见问题)
-- [致谢与许可](#-致谢与许可)
+每天早上，一个 GitHub Actions 工作流（免费、无需服务器）：
 
----
+1. **学习你的口味** —— 从你的 Zotero 文献库提炼主题、方法，以及你真正阅读的*质量标准*。
+2. **抓取最新论文** —— 来自 arXiv、bioRxiv 和 medRxiv。
+3. **快速初筛** —— 用确定性的数学方法（向量嵌入 + BM25 + 时效加权）。
+4. **让自主 agent 做决定** —— 它自己抓取全文、逐页精读、给每篇论文的*工作质量*打分（0–10），并用你的语言撰写摘要。
+5. **发一封精美的 HTML 邮件**：导语、专家排序的卡片（带 **Relevance** 相关度徽章和 **Work** 工作水平徽章），以及完整的"其他候选"区 —— 每篇都打了分，不静默丢弃任何一篇。
 
-## 🧠 这是什么？
+数学负责排序，agent 负责判断。嵌入分数只是提示，不是结论。
 
-**Zotero-arXiv-Daily** 是一个 **AI 学术图书管理员**，依托 GitHub Actions 免费运行。每天清晨它替你完成：
+## 核心特性
 
-1. **从你的 Zotero 文献库学习研究方向**（主题、关键词、方法）。
-2. **抓取最新论文**（arXiv / bioRxiv / medRxiv）。
-3. **用快速、确定性的计算粗筛**（向量相似度 + BM25 + 时间衰减加权）。
-4. **让智能体做最终判断** —— 就像资深研究者浏览新一期论文时那样思考：*这篇论文值得你花时间吗？为什么？*
-5. **给你发一封排版精美的 HTML 邮件** —— 主题、开场、每篇的推荐理由、结尾，全部由智能体用你的语言撰写。
+- **Pi agent 引擎**（`agent/run.mjs` + `agent/ROLE.md`）—— 一个真正的编码 agent，自带工具：`inspect_candidates`、`fetch_full_text`、`inspect_paper`（分页）、`search_candidates`、`search_web`、`compare_papers`、`submit_digest`。它自己决定读什么、自己抓全文逐页精读，每一条推荐都基于实际内容。
+- **工作质量评分** —— 每个候选（选中与否）都有 **Work** 徽章（0–10），评判严谨性、新颖性和来源可信度。水文/低质论文即使看似相关也会被点名。
+- **可辩护的排序** —— 更强的工作在前；评审器审计排序倒挂。
+- **保证读全文** —— 阅读进度被追踪；一篇论文必须真正读过（而非扫标题）才能被推荐。
+- **生成器 + 评审器** —— 独立评审器给每版草稿打分并驱动修订轮次。
+- **安全渲染** —— 所有文本字段 HTML 转义、LaTeX→Unicode、链接白名单。agent 只写 JSON，不碰标记语言。
+- **优雅降级** —— Pi 失败 → Python harness → 嵌入排序摘要。邮件永远发得出去。
+- **无缝隙回溯、已发去重、多来源、多收件人、webhook 通知、中英双语。**
 
-> 没有僵硬的流水线，没有逐篇打分的机械流程。计算负责排序，智能体负责决策。
+## 快速开始
 
----
+1. **Fork** 本仓库。
+2. **配置** —— 填写 `config/custom.yaml`（已提交示例；CI 会用 `CUSTOM_CONFIG` 变量覆盖它）：
+   - Zotero：`user_id`、`api_key`
+   - LLM：`OPENAI_API_KEY`、`OPENAI_API_BASE`（推荐 OpenRouter）
+   - 邮箱：`SENDER`、`RECEIVER`、`SENDER_PASSWORD`
+   - 你的 arXiv 分类：`source.arxiv.category`
+3. **运行** —— 工作流每天 22:00 UTC（北京时间 06:00，紧跟 arXiv 凌晨发布）自动触发。也可随时手动：*Actions → Send emails daily → Run workflow*。
 
-## ⚙️ 工作原理
-
-流水线把**廉价计算**和**编辑判断**清晰地分开：
-
-```
-arXiv/bioRxiv/medRxiv 订阅源        你的 Zotero 文献库
-        │                                    │
-        ▼                                    ▼
-  ┌─────────────────────────────────────────────────┐
-  │  1. 重排（确定性计算，无 LLM）                    │
-  │     • 每篇候选论文都做向量化                      │
-  │     • 每篇库论文都做向量化（有缓存）               │
-  │     • 余弦相似度 × 时间衰减 + 30% BM25 词法分     │
-  │       → 得到 0–10 分                             │
-  └───────────────────────┬─────────────────────────┘
-                          ▼
-  ┌─────────────────────────────────────────────────┐
-  │  2. 过滤（确定性计算）                            │
-  │     • min_score / 关键词包含-排除                 │
-  │     • 已发送历史去重（绝不重复推荐）               │
-  │     • 保留前 N 篇（max_paper_num，如 30）         │
-  └───────────────────────┬─────────────────────────┘
-                          ▼
-  ┌─────────────────────────────────────────────────┐
-  │  3. 智能体（LLM，专家）                           │
-  │     • 读取你的研究画像                            │
-  │     • 用工具亲自审阅候选论文                      │
-  │     • 精选 3–6 篇并撰写推荐理由                   │
-  │     • 按编辑价值排列顺序 ——                      │
-  │       邮件展示的顺序就是它的判断                  │
-  └───────────────────────┬─────────────────────────┘
-                          ▼
-  ┌─────────────────────────────────────────────────┐
-  │  4. 评审器（独立审稿人）                          │
-  │     • 全新上下文、无工具                          │
-  │     • 给草稿打分（0–10）、列出问题                │
-  │     • 通过 → 发送；需修改 → 智能体改进            │
-  └───────────────────────┬─────────────────────────┘
-                          ▼
-              安全 HTML 渲染 → 邮件 + Webhook
-```
-
-**核心思想**：向量分数只是一个*提示*。智能体才是专家 —— 它决定推荐什么、每篇怎么说、以及你应该按什么顺序读。
-
----
-
-## ✨ 功能特性
-
-| 特性 | 说明 |
-|------|------|
-| 🧠 **单一智能体，完整编辑权** | 一个智能体循环读取你的画像、用工具审阅候选、撰写整封邮件 |
-| 🏆 **专家排序** | 邮件卡片的顺序就是智能体的编辑顺序 —— 而不是机械的分数排序 |
-| ⭐ **工作水平评分** | 每张卡片都带一个 **工作水平** 徽章（0–10）：智能体对该论文本身质量的评判 —— 严谨性、创新性、方法完备性、作者/机构可信度。即使向量相关度很高，水文/野鸡机构论文也会被揪出来 |
-| 🧾 **候选也带标签** | 未入选的论文同样获得 相关度 + 工作水平 两个标签（独立一行显示），并附智能体对这批候选为什么落选的整体点评 |
-| 🎯 **品味匹配** | 研究画像不仅提炼主题，还提炼研究者的 *品味* 与质量底线；选稿不仅看关键词重合，更看是否符合你的口味 |
-| ⚡ **提示词缓存友好** | agent 循环给稳定的系统提示词打上 prompt-cache 断点，多轮对话命中供应商缓存 —— 更省 token、更低延迟 |
-| 🧱 **固定邮件标题** | 邮件主题是固定的 `Zotero-arXiv-Daily … · <日期>` —— 可扫读，绝不自由发挥 |
-| 🔧 **真正的工具调用循环** | 智能体自主研究：`inspect_candidates` → `fetch_full_text`（自己抓论文）→ `inspect_paper`（分页）→ `search_candidates` / `search_web` → `compare_papers` → `submit_digest`。读哪篇、读多深由它自己决定——没有脚本化流水线 |
-| 🌐 **深度调研** | `search_web`（AnySearch）让智能体在打分前核查论文出处——作者、机构、期刊/平台、上游方法、新颖性主张的先前工作（免费额度：每天 1,000 次） |
-| ⚖️ **生成 + 评审双智能体** | 独立评审器给每份草稿打分（分数/问题/通过与否）；`revise` 会把问题反馈给生成器修订，最多 `max_revisions` 轮 |
-| 📝 **结构化输出** | 智能体提交类型化的 `Digest`（主题 / 开场 / 论文 / 结尾）；渲染层只信任结构，绝不信任 LLM 原文 |
-| 🛡️ **安全渲染** | 所有文本字段 HTML 转义，LaTeX 公式转 Unicode（`$\alpha$` → `α`），链接只放行 http(s) |
-| 📧 **邮件客户端适配** | 中文字体栈、Outlook 安全的纯色按钮、响应式布局、隐藏 preheader |
-| 🌐 **本地化** | 界面标签和邮件语言随 `llm.language` 切换（中文 / English） |
-| 📅 **无漏回溯** | `lookback_days`（默认 2）保留昨天+今天 —— 漏跑一天也不会丢前一天的论文 |
-| 🪂 **优雅降级** | 智能体故障时自动回退为按向量排序的简化邮件 —— 每天的邮件保证送达 |
-| 📦 **邮件存档** | 每次运行保存 `cache_dir/last_email.html` 并上传为 CI 产物，方便随时复查 |
-| 📚 **多数据源** | arXiv（含周末 API 兜底）、bioRxiv、medRxiv，支持交叉列表 |
-| 🎯 **混合重排** | BM25 + 向量相似度，支持本地或 API 向量模型 |
-| 🔍 **关键词过滤** | 按标题/摘要子串包含/排除论文 |
-| 🚫 **历史去重** | 已推送过的论文绝不重复发送 |
-| 👥 **多收件人** | 一封推荐，多人共享（`email.receivers`） |
-| 🔔 **Webhook 通知** | Telegram、Server酱、Discord、Slack……通过 HTTP POST 推送到任意平台 |
-| 💸 **零成本部署** | 依托 GitHub Actions 免费运行 —— 不需要服务器，不需要订阅 |
-
----
-
-## 🚀 快速开始
-
-### 前置条件
-
-- 一个 [Zotero](https://www.zotero.org/) 文献库（有几篇论文即可）
-- 一个 LLM API 密钥（如 [OpenRouter](https://openrouter.ai)）
-- 一个支持 SMTP 的邮箱（QQ、Gmail、Outlook 等）
-
-### 1. Fork 并克隆
-
-```bash
-git clone https://github.com/<你的用户名>/zotero-arxiv-daily.git
-cd zotero-arxiv-daily
-```
-
-### 2. 安装依赖
-
-```bash
-uv sync        # 或：pip install -e .
-```
-
-### 3. 配置
-
-把 `config/base.yaml` 复制为 `config/custom.yaml`，填写必填项：
-
-```yaml
-zotero:
-  user_id: "12345678"          # 你的 Zotero 用户 ID
-  api_key: "***"            # Zotero API Key（只读权限）
-
-source:
-  arxiv:
-    category: ["cs.AI", "cs.LG"]   # 你的研究方向分类
-    lookback_days: 2               # 保留昨天+今天（无漏回溯）
-
-llm:
-  api:
-    key: "sk-or-..."               # OpenRouter API Key
-    base_url: "https://openrouter.ai/api/v1"
-  generation_kwargs:
-    model: "openai/gpt-5.6-luna"   # 推荐的智能体模型
-  language: Chinese                # 邮件语言：Chinese | English
-  harness:
-    enabled: true
-    engine: pi                    # pi（默认）| python（旧版 harness）
-    top_k: 100                     # 智能体最多可见的候选数
-    full_text_budget: 10           # 旧版 python 引擎：预取顶部 N 篇；Pi 引擎自己抓全文
-    max_steps: 12                  # 智能体循环预算
-    max_revisions: 2               # 评审改进轮数（python 引擎）
-    evaluator_enabled: true        # 独立评审器开关（python 引擎）
-    web_search_budget: 15          # 每次运行 search_web 硬上限（pi 引擎）
-    pi_timeout: 900                # Pi 子进程超时秒数
-
-email:
-  sender: "you@example.com"
-  receiver: "you@outlook.com"
-  smtp_server: "smtp.example.com"
-  smtp_port: 465
-  sender_password: "你的SMTP授权码"
-
-executor:
-  source: ["arxiv"]
-  reranker: api                    # 'api'（OpenAI 兼容）或 'local'
-  max_paper_num: 30                # 给智能体的候选窗口
-```
-
-全部配置项见 [`config/base.yaml`](config/base.yaml)。
-
-### 4. 本地调试运行
+本地调试（渲染邮件但不发送）：
 
 ```bash
 DEBUG=true uv run src/zotero_arxiv_daily/main.py
+# 查看 .cache/last_email.html
 ```
 
-渲染结果在 `.cache/last_email.html` —— 调试模式不会真的发信。
+完整配置参考：[`config/base.yaml`](config/base.yaml)。
 
-### 5. 部署到 GitHub Actions
-
-1. 把你的 Fork 推到 GitHub。
-2. **Settings → Secrets and variables → Actions** 添加：
-   - `ZOTERO_ID`、`ZOTERO_KEY`
-   - `OPENAI_API_KEY`、`OPENAI_API_BASE`
-   - `SENDER`、`RECEIVER`、`SENDER_PASSWORD`
-3. 可选：设置变量 `CUSTOM_CONFIG`（一段 YAML，合并覆盖默认配置）—— 不用改代码就能调整分类、语言、收件人。
-4. 工作流**每天 22:00 UTC 自动运行**（北京时间早 6:00 —— 正好在 arXiv 每日凌晨 4 点发布之后）。可在 `.github/workflows/main.yml` 修改 cron。想立即触发？*Actions → Send emails daily → Run workflow* 手动跑一次。
-
----
-
-## 📧 邮件结构
-
-一封渲染好的推荐邮件长这样：
-
-| 部分 | 谁写的 | 说明 |
-|------|--------|------|
-| **主题** | 模板 | 固定格式：`Zotero-arXiv-Daily … · <日期>` —— 稳定、可扫读 |
-| **开场** | 智能体 | 今天这批论文的整体情况 |
-| **卡片** | 智能体精选 + 排序 | 标题 → 摘要链接、来源徽章、相关度标签、**工作水平标签**、「推荐理由」、PDF/摘要按钮 |
-| **其他候选** | 智能体点评 + 流水线 | 未入选论文每篇也带同样的两个标签（独立一行），顶部是智能体对它们为何落选的整体点评 |
-| **结尾** | 智能体 | 收尾与展望 |
-| **页脚** | 模板 | 退订提示，本地化 |
-
-**卡片的顺序是智能体的编辑排序，但有一条硬规则**：工作水平必须递减 —— 最强的论文排最前（同分按相关度，再按品味）。每张卡片带两个标签：**相关度**（向量/BM25 的廉价主题匹配提示）和**工作水平**（智能体对该论文质量的自主评判 —— 工作是否严谨、新颖、可信，按固定的 0–10 分档打分）。请更相信工作水平而不是相关度：订阅流里多的是表面相关、实则肤浅或出处可疑的论文。下方未入选的候选同样带这两个标签（智能体无法评判时显示 n/a），并附智能体对它们为何落选的点评。
-
----
-
-## 🏗 架构
+## 架构
 
 ```
-┌──────────────────┐      ┌───────────────────┐      ┌─────────────────┐
-│   Zotero 文献库    │      │  arXiv/bioRxiv/   │      │  .cache/        │
-│  (CorpusPaper[])  │      │  medRxiv 订阅源    │      │  (向量缓存、    │
-└────────┬─────────┘      └─────────┬─────────┘      │   已发送历史)    │
-         │                          │                └────────┬────────┘
-         ▼                          ▼                         │
-   build_profile              retrieve_papers                │
-   (LLM 提炼画像，       ┌───────┴────────┐                  │
-    按内容哈希缓存)       │  rerank (BM25  │                  │
-         │               │  + 向量相似度)  │                  │
-         │               └───────┬────────┘                  │
-         │                       ▼                           │
-         │                 filter（最低分 /                 │
-         │                 关键词 / 已发送去重）               │
-         │                       │                           │
-         │                       ▼                           │
-         │            ┌──────────────────────────┐            │
-         │            │   Pi 智能体引擎            │◄───────────┘
-         │            │  (agent/run.mjs, Node)   │   候选列表
-         │            │  ROLE.md = 需求契约       │   + 向量分数
-         │            │  + Zotero 论文库          │   + 研究画像
-         │            │                          │
-         │            │  agent 自有的工具：        │   它自己决定读哪篇、
-         │            │  inspect_candidates       │   自己抓全文（bash）、
-         │            │  fetch_full_text (bash)  │   分页精读、给每个候选
-         │            │  inspect_paper（分页）     │   打分、必要时深度调研
-         │            │  search_candidates        │   出处，最后提交 digest
-         │            │  search_web (AnySearch)  │
-         │            │  compare_papers           │
-         │            │  submit_digest            │
-         │            └──────────┬───────────────┘
-         │                       │  digest JSON
-         │                       ▼
-         │            ┌──────────────────────┐
-         │            │   （可选）旧版引擎     │  Python HarnessAgent：
-         │            │   生成器/评审器循环    │  用于 engine=python
-         │            │                      │  或 Pi 失败时回退
-         │            └──────────┬───────────┘
-         │                       │  最终 Digest（结构化 JSON）
-         ▼                       ▼
-   ┌──────────────────────────────────────┐
-   │   construct_email（安全 HTML 渲染）    │
-   └──────────────────┬───────────────────┘
-                      ▼
-            ┌──────────────────┐
-            │  通知发送         │
-            │  邮件 / Webhook  │
-            └──────────────────┘
+Zotero 文献库 ──► 构建画像（LLM，缓存）
+数据源 ──► 抓取 ──► 重排（嵌入+BM25）──► 过滤 ──► 前 N 候选
+                                                          │
+                        ┌─────────────────────────────────▼──────────┐
+                        │  Pi agent（Node，agent/run.mjs + ROLE.md）  │
+                        │  读画像 + 原始 Zotero 库 + 候选列表          │
+                        │  自己抓全文、分页精读、打 Work 0–10 分、提交  │
+                        └─────────────────────────────────┬──────────┘
+                        （降级：Python HarnessAgent → 嵌入排序）
+                                                          ▼
+                        construct_email（安全 HTML）──► email / webhook
 ```
 
-**为什么用智能体引擎？** 邮件里每一句编辑决定——推荐哪些论文、每篇理由怎么写、邮件怎么组织——都由智能体负责：默认用 Pi 编码智能体（`agent/run.mjs` + `agent/ROLE.md`，仓库自身的创新点：把通用智能体框架变成一位挑剔的研究馆员）；Pi 不可用或失败时回退到 Python HarnessAgent（生成器/评审器双智能体循环），再失败则退化为向量排序摘要——日常邮件一定能发出去。
-
----
-
-## 📂 项目结构
+## 项目结构
 
 ```
-src/zotero_arxiv_daily/
-├── protocol.py          # 数据类：Paper、CorpusPaper、RawPaperItem
-├── harness.py           # 旧版 Python HarnessAgent（engine=python / Pi 回退）
-├── construct_email.py   # 安全 HTML 渲染：Digest → 邮件 HTML
-├── executor.py          # 编排器：抓取 → 重排 → 过滤 → 智能体 → 发送
-├── retriever/           # arXiv、bioRxiv、medRxiv 抓取器
-├── reranker/            # 混合重排（BM25 + 向量，本地或 API）
-└── notifier.py          # 发送插件（邮件、Webhook）
-
-agent/                   # Pi 智能体引擎（Node）
-├── ROLE.md              # ★ 仓库创新点：需求式角色契约（任务、质量条、工具、约束）——方案由智能体自己定
-├── run.mjs              # 入口：候选 + Zotero 论文库 JSON → Pi 智能体 → digest JSON
-├── fetch_text.py        # 命令行全文抓取器——智能体自己决定读哪篇并调用它
-├── models.json          # 自定义提供商（经 $OPENAI_API_KEY 走 OpenRouter）
-└── package.json         # @earendil-works/pi-coding-agent + pi-ai
-
-config/
-├── base.yaml            # 完整配置模板（默认值 + 文档）
-├── custom.yaml          # 你的覆盖配置（示例已提交；CI 会覆盖它）
-└── default.yaml         # 组合根：base + custom
-
-tests/                   # 170+ 个测试，ruff 干净
-docs/HARNESS.md          # 生成器/评审器设计文档
-.github/workflows/       # CI + 每日推送 + keep-alive
+src/zotero_arxiv_daily/   Python 流水线：executor、harness（旧引擎）、
+                          construct_email、retrievers、rerankers、notifier
+agent/                    Pi agent 引擎：run.mjs、ROLE.md、fetch_text.py、
+                          models.json（自定义 OpenRouter provider）
+config/                   base.yaml（schema）+ custom.yaml（覆盖）
+tests/                    195 个测试，ruff 干净
+docs/HARNESS.md           生成器/评审器设计文档
 ```
 
----
+## 上游与许可
 
-## 🔧 配置参考
+基于 [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily) 的完全重写，围绕自主 agent 架构重建。相比上游的改动见 [Releases](https://github.com/Dytchem/zotero-arxiv-daily/releases)。
 
-| 配置段 | 键 | 说明 |
-|--------|-----|------|
-| `zotero` | `user_id`、`api_key` | Zotero 账户凭据 |
-| `zotero` | `include_path`、`ignore_path` | 包含/排除文献库集合的 glob 模式 |
-| `source.arxiv` | `category`、`include_cross_list`、`lookback_days`、`fallback_days` | arXiv 分类；保留最近 N 天（无漏）；RSS 为空（周末）时用 API 兜底 |
-| `source.biorxiv` / `source.medrxiv` | `category` | bioRxiv / medRxiv 分类 |
-| `llm.api` | `key`、`base_url` | LLM 提供商（推荐 OpenRouter） |
-| `llm.generation_kwargs` | `model`、`max_tokens` | 智能体模型 + 生成参数 |
-| `llm.language` | `Chinese` / `English` | 邮件语言（界面标签 + 智能体输出） |
-| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`max_revisions`、`evaluator_enabled`、`web_search_budget`、`pi_timeout` | 智能体引擎 + 循环调优；`full_text_budget` 只作用于旧版 Python 引擎（Pi 引擎自己抓全文）；Pi 引擎里 `max_steps` 是硬性工具调用预算（SDK 无原生上限）；`web_search_budget` 限制每次运行 `search_web` 次数；Pi 失败时回退 Python harness，再退化向量排序 |
-| `reranker` | `local` / `api` | 向量后端（模型、batch_size、cache_dir） |
-| `executor` | `rerank_alpha` | 混合权重：1.0 = 纯向量，0.0 = 纯 BM25，null = 仅向量 |
-| `executor` | `min_score`、`keywords_include`、`keywords_exclude` | 智能体前的确定性过滤 |
-| `executor` | `max_paper_num`、`dedupe_history`、`cache_dir` | 候选窗口、去重开关、状态文件位置 |
-| `executor` | `notifiers` | 发送渠道：`['email']`、`['email', 'webhook']` |
-| `email` | `sender`、`receiver`、`receivers`、`smtp_*` | SMTP 发送（可加抄送收件人） |
-
----
-
-## 🧪 测试
-
-```bash
-uv run pytest        # 170+ 个测试，覆盖率约 89%
-uvx ruff check src/ tests/
-```
-
-支持 Python 3.13+。
-
----
-
-## ❓ 常见问题
-
-**论文到底是怎么选出来的？**
-流水线先给每篇候选论文和每篇库论文做向量化，计算匹配分（余弦 × 时间衰减 + BM25），再经过确定性过滤（最低分、关键词、已发送历史），把幸存的前 N 篇交给智能体。最终推荐什么，由智能体 —— 而不是公式 —— 决定。
-
-**邮件里的顺序是谁定的？**
-智能体。它被明确要求像资深研究者一样排序：对你最重要的排在前面。向量分数只是提示，不是排序依据。
-
-**为什么周末也能收到论文？**
-arXiv 周末不发布新论文，RSS 是空的。工作流会自动回退到 arXiv API 拉取最近 `fallback_days`（默认 7）天的论文，保证周一的邮件也有内容。
-
-**如果某天运行失败/漏跑了怎么办？**
-`lookback_days`（默认 2）会把昨天的论文留在窗口内，加上已发送历史去重 —— 漏跑一天，第二天自动补上，不会重复也不会丢失。
-
-**会不会收到重复论文？**
-不会。每封邮件里出现过的论文（无论精选还是「其他候选」）都会记入 `sent_papers.json`，之后运行自动过滤掉。
-
-**怎么切换语言？**
-设置 `llm.language: Chinese` 或 `English`。智能体的写作和界面标签都会切换。
-
-**需要什么模型？**
-一个 LLM 给智能体用（如 OpenRouter 上的 `openai/gpt-5.6-luna`），可选一个向量 API 做重排（如 `qwen/qwen3-embedding-8b`）—— 或者 `pip install .[local-reranker]` 用本地模型。
-
-**真的免费吗？**
-GitHub Actions 免费额度足够公共仓库每日运行。不需要服务器，不需要订阅。
-
----
-
-## 🙏 致谢与许可
-
-本项目是对 [TideDra/zotero-arxiv-daily](https://github.com/TideDra/zotero-arxiv-daily) 的彻底重写，围绕生成器/评审器双智能体架构重建 —— 借鉴了 Claude Code、Codex、OpenClaw 的智能体模式，以及 Anthropic 的 harness 研究。感谢原作者。
-
-**许可**：MIT —— 自由使用。但请记住这是一个个人科研工具：你的 Zotero 数据和邮箱地址属于你自己，请妥善保管。
+**MIT** —— 你的 Zotero 数据和邮箱地址始终属于你；这个工具只是读取它们来给你发一封摘要。

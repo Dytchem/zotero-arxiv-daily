@@ -2,73 +2,85 @@
 
 ## Project Overview
 
-Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's Zotero library. It computes embedding similarity between new papers and the user's existing library, generates TLDRs via LLM, and delivers results by email. Designed to run as a GitHub Actions workflow at zero cost.
+Zotero-arXiv-Daily turns your Zotero library into a daily arXiv/bioRxiv/medRxiv
+digest email. The Python pipeline does the deterministic work (fetch, embed,
+rerank, filter, safe HTML render); an autonomous **Pi agent** (`agent/run.mjs`
++ `agent/ROLE.md`) does the editorial work — what to recommend, why, in what
+order, with a Work-quality score (0–10) on every candidate. Runs free on
+GitHub Actions.
 
 ## Commands
 
 ```bash
-# Install/sync dependencies
-uv sync
-
-# Run the application
-uv run src/zotero_arxiv_daily/main.py
-
-# Run tests (excludes slow tests by default)
-uv run pytest
-
-# Run all tests including slow ones
-uv run pytest -m ""
-
-# Run a single test
-uv run pytest tests/test_utils.py::TestGlobMatch -v
+uv sync                                  # install/sync dependencies
+uv run src/zotero_arxiv_daily/main.py    # run the pipeline
+uv run pytest                            # tests (skips slow ones)
+uvx ruff check src/ tests/               # lint (ruff IS configured, see pyproject.toml)
+node --check agent/run.mjs               # syntax-check the Pi agent entry point
 ```
-
-No linter or formatter is configured.
 
 ## Architecture
 
-The app is a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily/executor.py`):
+Orchestrated by `Executor` (`src/zotero_arxiv_daily/executor.py`):
 
-1. **Fetch Zotero corpus** → pyzotero API
+1. **Fetch Zotero corpus** → pyzotero API (empty abstracts fall back to title)
 2. **Filter corpus** → `include_path` / `ignore_path` glob patterns
-3. **Retrieve new papers** → from configured sources (arXiv RSS, bioRxiv/medRxiv REST API)
-4. **Rerank** → weighted embedding similarity to corpus (newer Zotero papers weighted higher)
-5. **Generate TLDRs + affiliations** → OpenAI-compatible LLM API
-6. **Render + send email** → HTML email via SMTP
+3. **Retrieve new papers** → arXiv RSS (+weekend API fallback), bioRxiv/medRxiv
+4. **Rerank** → embedding + optional BM25 hybrid vs corpus, recency-weighted
+   (a hint for the agent, not the final ranking)
+5. **Filter** → min_score / keywords / sent-history dedupe / max_paper_num
+6. **Agent digest** → engine `pi` (default): `node agent/run.mjs` runs the Pi
+   coding agent with ROLE.md as the requirements contract and custom tools
+   (inspect_candidates / fetch_full_text / inspect_paper paged /
+   search_candidates / search_web / compare_papers / finish_reading /
+   submit_digest). Pi failure → legacy Python `HarnessAgent` (`harness.py`) →
+   plain embedding-order digest.
+7. **Render + send** → `construct_email.py` (pure safe HTML render), delivered
+   via notifiers (email / webhook), fixed subject.
 
 ### Plugin Systems
 
-**Retrievers** (`src/zotero_arxiv_daily/retriever/`): Register via `@register_retriever("name")` decorator on a `BaseRetriever` subclass. Each retriever implements `_retrieve_raw_papers()` and `convert_to_paper()`. Discovered at runtime via `get_retriever_cls(name)` from a module-level `registered_retrievers` dict.
+- **Retrievers** (`retriever/`): `@register_retriever("name")` on a
+  `BaseRetriever` subclass; implement `_retrieve_raw_papers()` and
+  `convert_to_paper()`; discovered via `get_retriever_cls(name)`.
+- **Rerankers** (`reranker/`): `@register_reranker("name")`; `local`
+  (sentence-transformers) and `api` (OpenAI-compatible embeddings).
+- **Notifiers** (`notifier.py`): `@register_notifier("name")`; built-ins
+  `email` (SMTP in `email_sender.py`) and `webhook`.
 
-**Rerankers** (`src/zotero_arxiv_daily/reranker/`): Register via `@register_reranker("name")` decorator on a `BaseReranker` subclass. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint). Discovered via `get_reranker_cls(name)`.
+Follow the existing pattern when adding a plugin: new file, subclass the base,
+apply the registration decorator, implement the abstract methods.
 
-When adding a new retriever or reranker, follow the existing pattern: create a new file, subclass the base, apply the registration decorator, and implement the abstract methods.
+## Configuration
 
-### Configuration
+Hydra + OmegaConf. `config/default.yaml` composes `base.yaml` (schema/defaults)
++ `custom.yaml` (overrides). Env interpolation: `${oc.env:VAR,default}`.
+`llm.harness.engine`: `pi` (default) | `python`. Entry: `@hydra.main`.
 
-Uses Hydra + OmegaConf. Config composes from `config/base.yaml` (defaults with `???` placeholders for required values) + `config/custom.yaml` (user overrides). The composition order is defined in `config/default.yaml`. Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main(config_name="default")`.
+## Data Classes
 
-### Data Classes
-
-`Paper` and `CorpusPaper` in `src/zotero_arxiv_daily/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly with `tiktoken`-based token truncation.
+`Paper` / `CorpusPaper` in `protocol.py`. `Paper` is a plain data class —
+the old LLM-powered `generate_tldr` / `generate_affiliations` methods are gone.
 
 ## Testing Conventions
 
-- Tests use **pytest monkeypatch + `SimpleNamespace`** for stubs — not `unittest.mock`.
-- A session-scoped Hydra config in `tests/conftest.py` is deep-copied per test via the `config` fixture.
-- Canned response factories live in `tests/canned_responses.py` (e.g., `make_stub_openai_client()`, `make_stub_zotero_client()`).
-- Tests marked `@pytest.mark.slow` require heavy dependencies (model downloads) and are excluded by default (`addopts = "-m 'not slow'"` in pyproject.toml).
-- Monkeypatching targets the module-level import path (e.g., `"zotero_arxiv_daily.executor.zotero.Zotero"`).
+- pytest monkeypatch + `SimpleNamespace` stubs, no Docker/network.
+- Session-scoped Hydra config in `tests/conftest.py`, deep-copied per test.
+- Canned factories in `tests/canned_responses.py`.
+- Slow tests (`@pytest.mark.slow`, model downloads) excluded by default
+  (`addopts = "-m 'not slow'"`).
+- Monkeypatch module-level import paths (e.g. `"zotero_arxiv_daily.executor.zotero.Zotero"`).
 
 ## Coding Conventions
 
-- **Logging:** `loguru.logger` throughout — never `print()` or stdlib `logging`.
-- **Type hints:** Modern Python 3.10+ syntax (`list[Paper]`, `str | None`).
-- **Constants:** Module-level `UPPER_SNAKE_CASE`.
-- **Private methods:** Prefixed with `_` (e.g., `_retrieve_raw_papers`).
-- **Error handling:** Graceful degradation with try/except and fallback logic; log warnings rather than raising.
-- **Config injection:** All major components receive `DictConfig` at init and store it as `self.config`.
+- **Logging:** `loguru.logger` — never `print()` or stdlib `logging`.
+- **Type hints:** modern syntax (`list[Paper]`, `str | None`).
+- **Constants:** module-level `UPPER_SNAKE_CASE`; private methods `_`-prefixed.
+- **Error handling:** graceful degradation with try/except + fallback; log
+  warnings rather than raising.
+- **Config injection:** components receive `DictConfig` at init, stored as
+  `self.config`.
 
 ## Git Workflow
 
-- PRs should target the **`dev`** branch, not `main`.
+- PRs target the `dev` branch, not `main`.

@@ -493,7 +493,8 @@ function buildTools(ctx) {
         const notes = [];
         for (let ci = 0; ci < chunks.length; ci++) {
           const sys =
-            "You are a meticulous research librarian. Given a chunk of a paper's full text, extract: METHODS (specific techniques), EXPERIMENTS/RESULTS (specific numbers/systems/findings), LIMITATIONS, and a ONE-LINE takeaway. Be concrete and grounded in the text; do not invent. Reply in the digest language.";
+            "You are a meticulous research librarian. Given a chunk of a paper's full text, extract: METHODS (specific techniques), EXPERIMENTS/RESULTS (specific numbers/systems/findings), LIMITATIONS, and a ONE-LINE takeaway. Be concrete and grounded in the text; do not invent. Reply in the digest language.\n" +
+            "Format: bullet points under each heading (METHODS / EXPERIMENTS / RESULTS / LIMITATIONS / TAKEAWAY). Keep it tight — aim for 3-6 bullets per section, one sentence each, and NEVER omit specific numbers, method names, or findings. Substance beats brevity, but no filler.";
           const usr = `Paper: ${p.title}\n${params.focus ? `Focus: ${params.focus}\n` : ""}Chunk ${ci + 1}/${chunks.length}\n${chunks[ci]}`;
           const resp = await fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
@@ -504,7 +505,11 @@ function buildTools(ctx) {
                 { role: "system", content: sys },
                 { role: "user", content: usr },
               ],
-              max_tokens: 700,
+              // Generous cap: the prompt asks for tight bullet notes, so a
+              // dense chunk should fit well under this. Never trim hard at
+              // 700 tokens — truncated notes lose the numbers the main agent
+              // needs to judge work quality.
+              max_tokens: 4096,
             }),
             signal: AbortSignal.timeout(60000),
           });

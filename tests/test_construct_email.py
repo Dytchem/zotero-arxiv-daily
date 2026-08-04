@@ -182,6 +182,40 @@ def test_render_email_others_have_badges_on_own_line():
     assert "Relevance: 4.2" in html
 
 
+def test_render_email_others_read_first():
+    """Papers the agent actually read (have a note/analysis) come FIRST in the
+    others block — readers see analysed entries up front, unannotated ones
+    after — while each group stays relevance-descending."""
+    digest = Digest(
+        subject="s",
+        intro="",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="",
+        others=[
+            {"index": 1, "work_score": 6.0, "note": "analysed one"},   # read, score 3.0
+            {"index": 2, "work_score": 5.5, "note": "also analysed"},  # read, score 5.0
+        ],
+    )
+    originals = [
+        _paper(0, title="Picked Paper", score=7.5),
+        _paper(1, title="Read But Not Picked", score=3.0),
+        _paper(2, title="Also Read", score=5.0),
+        _paper(3, title="Never Touched High Rel", score=6.0),
+        _paper(4, title="Never Touched Low Rel", score=4.0),
+    ]
+    html = render_email(digest, originals=originals)
+    i1 = html.find("Read But Not Picked")
+    i2 = html.find("Also Read")
+    i3 = html.find("Never Touched High Rel")
+    i4 = html.find("Never Touched Low Rel")
+    assert i1 != -1 and i2 != -1 and i3 != -1 and i4 != -1
+    # read/analysed entries precede unannotated ones
+    assert i2 < i3 and i1 < i3, "analysed papers must come before unannotated ones"
+    # within the unannotated group, relevance order is preserved
+    assert i3 < i4
+    assert "analysed one" in html and "also analysed" in html
+
+
 def test_render_email_others_badge_not_inline_with_title():
     """The badges live on a separate line below the title (a <div> with margin),
     not concatenated inside the title link line."""

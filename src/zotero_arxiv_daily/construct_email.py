@@ -465,12 +465,22 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 and idx not in others_indices
             ):
                 others_indices.append(idx)
-        # Order the whole others block by relevance (embedding score), not by
-        # pool position: rescued pool papers must slot in among the candidates
-        # they belong with, not trail at the bottom. Papers without a score
-        # go last, keeping their relative order.
+        # Order the whole others block: papers the agent actually read and
+        # annotated (has a note / analysis) come FIRST — readers see the
+        # analysed entries up front — then the rest by relevance (embedding
+        # score). Rescued pool papers slot in where their score belongs;
+        # papers without a score go last, keeping their relative order.
+        note_of: dict[int, str] = {}
+        for entry in digest.others or []:
+            idx = int(entry.get("index", -1))
+            if idx >= 0:
+                note_of[idx] = entry.get("note", "")
         others_indices.sort(
-            key=lambda i: (originals[i].score is None, -(originals[i].score or 0))
+            key=lambda i: (
+                0 if note_of.get(i) else 1,  # analysed/read first
+                originals[i].score is None,  # unscored last
+                -(originals[i].score or 0),  # then relevance desc
+            )
         )
         others = [originals[i] for i in others_indices]
         if others:

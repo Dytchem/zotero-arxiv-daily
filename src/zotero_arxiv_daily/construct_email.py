@@ -199,7 +199,9 @@ def _work_html(score: float | None, language: str = "English", fallback_na: bool
 
 
 def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=None, work_score=None, language: str = "English") -> str:
-    title_text = _strip_markdown(_mathify(title))
+    # Escape the title like every other text field — a paper title can carry
+    # HTML entities / angle brackets and must not be inlined raw into markup.
+    title_text = _safe(_strip_markdown(_mathify(title)))
     title_html = title_text
     clean_url = _clean_link(url)
     if clean_url:

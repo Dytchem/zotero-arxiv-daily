@@ -639,6 +639,58 @@ def test_filter_sent_history_skipped_when_disabled(tmp_path):
     assert executor._filter_sent_history(papers) == papers
 
 
+def test_run_debug_skips_delivery(config, monkeypatch, tmp_path):
+    """Debug mode renders + archives the email but never sends it (README
+    promises 'debug mode skips sending') — otherwise a local debug run would
+    duplicate the daily email into the real inbox."""
+    import smtplib
+
+    from omegaconf import open_dict
+
+    from tests.canned_responses import (
+        make_sample_paper,
+        make_stub_openai_client,
+        make_stub_smtp,
+        make_stub_zotero_client,
+    )
+
+    with open_dict(config):
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.send_empty = False
+        config.executor.debug = True
+        config.executor.cache_dir = str(tmp_path)
+        config.reranker.api.cache_dir = str(tmp_path)
+
+    stub_zot = make_stub_zotero_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    monkeypatch.setattr(
+        registered_retrievers["arxiv"],
+        "retrieve_papers",
+        lambda self: [
+            make_sample_paper(title="Debug Paper", url="https://arxiv.org/abs/debug-1")
+        ],
+    )
+
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+
+    executor = Executor(config)
+    monkeypatch.setattr(executor, "_maybe_fetch_full_texts", lambda papers: None)
+    executor.run()
+
+    assert len(sent) == 0, "Debug mode must not send email"
+    # But the rendered email is still archived for review.
+    assert (tmp_path / "last_email.html").exists()
+
+
 # ---------------------------------------------------------------------------
 # run report
 # ---------------------------------------------------------------------------

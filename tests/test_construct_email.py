@@ -311,6 +311,22 @@ def test_render_email_escapes_html():
     assert "&lt;img src=x" in html
 
 
+def test_render_email_escapes_title():
+    """Paper titles must be HTML-escaped too — a title can carry entities
+    or angle brackets and must not be inlined raw into the card markup."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="",
+    )
+    paper = _paper(0, title="A <b>bold</b> & \"quoted\" title")
+    html = render_email(digest, originals=[paper])
+    assert "<b>bold</b>" not in html
+    assert "&lt;b&gt;bold&lt;/b&gt;" in html
+    assert "&amp;" in html
+    assert "&quot;" in html
+
+
 def test_render_email_mathify_title():
     """Inline LaTeX is converted to readable text, not left as raw \\alpha."""
     digest = Digest(

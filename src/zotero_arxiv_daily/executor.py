@@ -659,7 +659,14 @@ class Executor:
             logger.warning(f"Failed to archive rendered email: {exc}")
 
         logger.info("Delivering digest...")
-        self._deliver(html_content, subject=subject)
+        if self.config.executor.debug:
+            # Debug mode never sends: it exists for local preview / CI review
+            # of the rendered HTML (archived above and uploaded as an
+            # artifact). Sending from a debug run would duplicate the daily
+            # email to the real inbox.
+            logger.info("Debug mode: skipping delivery (rendered HTML archived at last_email.html)")
+        else:
+            self._deliver(html_content, subject=subject)
 
         if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
             # Record every candidate that made it into the email (picked ones

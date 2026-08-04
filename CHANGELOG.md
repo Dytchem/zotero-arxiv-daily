@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.3] - 2026-08-04
+
+### Fixed
+- **Email card titles were not HTML-escaped** (security/robustness):
+  `_get_block_html` inlined the raw paper title into the card markup while
+  every other text field was escaped — a title carrying `<`, `>` or `&`
+  could break the layout or inject markup. Titles are now escaped like all
+  other fields (regression test added).
+- **Debug mode still sent email** (README promised "debug mode skips
+  sending" but the pipeline delivered anyway — a local debug run would
+  duplicate the daily email into the real inbox). Debug runs now render and
+  archive `last_email.html` only, never send (regression test added).
+
+### Changed
+- Python harness `inspect_paper` now sends the abstract only on the first
+  page of a multi-page read (was re-sent on every page — token waste),
+  matching the Pi engine behavior.
+
 ## [1.5.2] - 2026-08-04
 
 ### Fixed

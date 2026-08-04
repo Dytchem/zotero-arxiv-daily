@@ -987,12 +987,15 @@ class HarnessAgent:
             if end < total
             else " | end of paper"
         )
+        # Abstract + metadata only on the first page — repeating them on every
+        # page wastes tokens on a long multi-page read (same as the Pi agent).
+        abstract_block = f"Full abstract:\n{p.abstract}\n" if offset == 0 else ""
         return (
             f"[{index}] {p.title}\n"
             f"Authors: {_authors_line(p)}\n"
             f"{affil}"
             f"URL: {p.url}\n"
-            f"Full abstract:\n{p.abstract}\n"
+            f"{abstract_block}"
             f"Full-text ({progress}{more}):\n{window}"
         )
 

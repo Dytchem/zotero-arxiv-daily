@@ -171,12 +171,13 @@ llm:
   language: English                # digest language: English | Chinese
   harness:
     enabled: true
+    engine: pi                    # pi (default) | python (legacy harness)
     top_k: 100                     # max candidates the agent may see
-    full_text_budget: 10           # full-text prefetch for top candidates
+    full_text_budget: 10           # legacy python harness: prefetch top-N; the Pi agent fetches full texts itself
     max_steps: 12                  # agent loop budget
-    min_inspections: 3             # submit gate: inspect ≥3 papers first
-    max_revisions: 2               # evaluator improvement rounds
-    evaluator_enabled: true        # independent reviewer on/off
+    max_revisions: 2               # evaluator improvement rounds (python engine)
+    evaluator_enabled: true        # independent reviewer on/off (python engine)
+    pi_timeout: 900                # kill the Pi subprocess after N seconds
 
 email:
   sender: "you@example.com"
@@ -260,11 +261,15 @@ agent could not judge), plus an agent-written note on why they were skipped.
          │            ┌──────────────────────────┐            │
          │            │   Pi agent engine        │◄───────────┘
          │            │  (agent/run.mjs, Node)   │   candidate list
-         │            │  ROLE.md = system prompt │   + embedding scores
-         │            │  inspect_candidates      │
-         │            │  inspect_paper (paged)   │
-         │            │  search_candidates       │
-         │            │  compare_papers          │
+         │            │  ROLE.md = requirements  │   + embedding scores
+         │            │  + Zotero library        │   + research profile
+         │            │                          │
+         │            │  agent's own tools:      │   it decides what to
+         │            │  inspect_candidates      │   read, fetches full
+         │            │  fetch_full_text (bash)  │   texts itself, pages
+         │            │  inspect_paper (paged)   │   through them, scores
+         │            │  search_candidates       │   every candidate, and
+         │            │  compare_papers          │   submits the digest
          │            │  submit_digest           │
          │            └──────────┬───────────────┘
          │                       │  digest JSON
@@ -304,8 +309,9 @@ src/zotero_arxiv_daily/
 └── notifier.py          # Delivery plugins (email, webhook)
 
 agent/                   # Pi agent engine (Node)
-├── ROLE.md              # ★ the repo's innovation: agent role definition (SURVEY→DEEP-DIVE→FOCUS→DECIDE→ORDER→SUBMIT)
-├── run.mjs              # Entry point: candidates JSON → Pi agent → digest JSON
+├── ROLE.md              # ★ the repo's innovation: requirements-based role contract (task, quality bar, tools, constraints) — the agent plans its own work
+├── run.mjs              # Entry point: candidates + Zotero library JSON → Pi agent → digest JSON
+├── fetch_text.py        # CLI full-text fetcher the agent calls to read papers itself
 ├── models.json          # Custom provider (OpenRouter via $OPENAI_API_KEY)
 └── package.json         # @earendil-works/pi-coding-agent + pi-ai
 
@@ -332,7 +338,7 @@ docs/HARNESS.md          # Generator/evaluator design document
 | `llm.api` | `key`, `base_url` | LLM provider (OpenRouter recommended) |
 | `llm.generation_kwargs` | `model`, `max_tokens` | Agent model + generation settings |
 | `llm.language` | `English` / `Chinese` | Digest language (labels + agent output) |
-| `llm.harness` | `enabled`, `engine` (`pi`/`python`), `top_k`, `full_text_budget`, `max_steps`, `min_inspections`, `max_revisions`, `evaluator_enabled`, `pi_timeout` | Agent engine + loop tuning; Pi failures fall back to the Python harness, then to embedding order |
+| `llm.harness` | `enabled`, `engine` (`pi`/`python`), `top_k`, `full_text_budget`, `max_steps`, `max_revisions`, `evaluator_enabled`, `pi_timeout` | Agent engine + loop tuning; `full_text_budget` applies to the legacy Python harness only (the Pi agent fetches full texts itself); Pi failures fall back to the Python harness, then to embedding order |
 | `reranker` | `local` / `api` | Embedding backend (model, batch_size, cache_dir) |
 | `executor` | `rerank_alpha` | Hybrid weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only |
 | `executor` | `min_score`, `keywords_include`, `keywords_exclude` | Deterministic pre-agent filters |

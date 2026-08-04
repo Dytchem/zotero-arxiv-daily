@@ -171,12 +171,13 @@ llm:
   language: Chinese                # 邮件语言：Chinese | English
   harness:
     enabled: true
+    engine: pi                    # pi（默认）| python（旧版 harness）
     top_k: 100                     # 智能体最多可见的候选数
-    full_text_budget: 10           # 顶部候选的全文预取数
+    full_text_budget: 10           # 旧版 python 引擎：预取顶部 N 篇；Pi 引擎自己抓全文
     max_steps: 12                  # 智能体循环预算
-    min_inspections: 3             # 提交门禁：至少深挖 3 篇
-    max_revisions: 2               # 评审改进轮数
-    evaluator_enabled: true        # 独立评审器开关
+    max_revisions: 2               # 评审改进轮数（python 引擎）
+    evaluator_enabled: true        # 独立评审器开关（python 引擎）
+    pi_timeout: 900                # Pi 子进程超时秒数
 
 email:
   sender: "you@example.com"
@@ -252,9 +253,13 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
          │            ┌──────────────────────────┐            │
          │            │   Pi 智能体引擎            │◄───────────┘
          │            │  (agent/run.mjs, Node)   │   候选列表
-         │            │  ROLE.md = 系统提示词      │   + 向量分数
-         │            │  inspect_candidates       │
-         │            │  inspect_paper（分页）     │
+         │            │  ROLE.md = 需求契约       │   + 向量分数
+         │            │  + Zotero 论文库          │   + 研究画像
+         │            │                          │
+         │            │  agent 自有的工具：        │   它自己决定读哪篇、
+         │            │  inspect_candidates       │   自己抓全文（bash）、
+         │            │  fetch_full_text (bash)  │   分页精读、给每个候选
+         │            │  inspect_paper（分页）     │   打分，最后提交 digest
          │            │  search_candidates        │
          │            │  compare_papers           │
          │            │  submit_digest            │
@@ -295,8 +300,9 @@ src/zotero_arxiv_daily/
 └── notifier.py          # 发送插件（邮件、Webhook）
 
 agent/                   # Pi 智能体引擎（Node）
-├── ROLE.md              # ★ 仓库创新点：智能体角色定义（SURVEY→DEEP-DIVE→FOCUS→DECIDE→ORDER→SUBMIT）
-├── run.mjs              # 入口：候选 JSON → Pi 智能体 → digest JSON
+├── ROLE.md              # ★ 仓库创新点：需求式角色契约（任务、质量条、工具、约束）——方案由智能体自己定
+├── run.mjs              # 入口：候选 + Zotero 论文库 JSON → Pi 智能体 → digest JSON
+├── fetch_text.py        # 命令行全文抓取器——智能体自己决定读哪篇并调用它
 ├── models.json          # 自定义提供商（经 $OPENAI_API_KEY 走 OpenRouter）
 └── package.json         # @earendil-works/pi-coding-agent + pi-ai
 
@@ -323,7 +329,7 @@ docs/HARNESS.md          # 生成器/评审器设计文档
 | `llm.api` | `key`、`base_url` | LLM 提供商（推荐 OpenRouter） |
 | `llm.generation_kwargs` | `model`、`max_tokens` | 智能体模型 + 生成参数 |
 | `llm.language` | `Chinese` / `English` | 邮件语言（界面标签 + 智能体输出） |
-| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`min_inspections`、`max_revisions`、`evaluator_enabled`、`pi_timeout` | 智能体引擎 + 循环调优；Pi 失败时回退 Python harness，再退化向量排序 |
+| `llm.harness` | `enabled`、`engine`（`pi`/`python`）、`top_k`、`full_text_budget`、`max_steps`、`max_revisions`、`evaluator_enabled`、`pi_timeout` | 智能体引擎 + 循环调优；`full_text_budget` 只作用于旧版 Python 引擎（Pi 引擎自己抓全文）；Pi 失败时回退 Python harness，再退化向量排序 |
 | `reranker` | `local` / `api` | 向量后端（模型、batch_size、cache_dir） |
 | `executor` | `rerank_alpha` | 混合权重：1.0 = 纯向量，0.0 = 纯 BM25，null = 仅向量 |
 | `executor` | `min_score`、`keywords_include`、`keywords_exclude` | 智能体前的确定性过滤 |

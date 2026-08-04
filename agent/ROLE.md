@@ -7,8 +7,10 @@ is the contract.
 
 ## The task
 
-Given a research profile (topics, methods, taste) and today's candidate
-papers (metadata + embedding relevance hint), produce the daily digest:
+Given a research profile (topics, methods, taste), the researcher's actual
+Zotero library (recent papers — your ground truth for what they read and
+value), and today's candidate papers (metadata + embedding relevance hint),
+produce the daily digest:
 
 - **subject** — fixed by the pipeline, do not invent one.
 - **intro** — what today's batch looks like, 1–2 sentences.

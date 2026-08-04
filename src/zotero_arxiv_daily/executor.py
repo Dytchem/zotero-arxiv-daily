@@ -320,6 +320,12 @@ class Executor:
             return None
 
         harness_cfg = llm_cfg.get("harness") or {}
+        # The agent also gets the raw Zotero library (recent papers, newest
+        # first) — not just the distilled profile — so it can judge the
+        # researcher's interests and taste itself.
+        recent_corpus = sorted(
+            corpus, key=lambda c: c.added_date, reverse=True
+        )[:50]
         input_payload = {
             "model": agent.model,
             "language": agent.language,
@@ -332,6 +338,15 @@ class Executor:
                 "summary": profile.summary,
                 "taste": profile.taste,
             },
+            "corpus": [
+                {
+                    "title": c.title,
+                    "abstract": (c.abstract or "")[:600],
+                    "added": c.added_date.date().isoformat(),
+                    "paths": c.paths or [],
+                }
+                for c in recent_corpus
+            ],
             "candidates": [
                 {
                     "index": i,

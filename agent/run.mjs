@@ -468,6 +468,18 @@ async function main() {
     .filter(Boolean)
     .join("\n");
 
+  // Raw Zotero library (recent papers, newest first) — the agent sees the
+  // researcher's actual library, not just the distilled profile, so it can
+  // judge interests and taste itself.
+  const corpusText = (input.corpus || [])
+    .map(
+      (c, i) =>
+        `${i + 1}. [${c.added || "?"}] ${c.title}\n` +
+        `   Paths: ${(c.paths || []).join(", ") || "-"}\n` +
+        `   Abstract: ${(c.abstract || "").slice(0, 300)}`
+    )
+    .join("\n");
+
   const tools = buildTools({
     candidates,
     profile,
@@ -497,6 +509,9 @@ async function main() {
     "",
     "## Inputs",
     `Research profile:\n${profileText}`,
+    corpusText
+      ? `Zotero library (recent ${(input.corpus || []).length} papers, newest first — this is the researcher's actual library; use it to calibrate what they care about):\n${corpusText}`
+      : "",
     `Language: write the digest in ${language}.`,
     `Candidates: ${candidates.length} paper(s) available. The full texts are NOT preloaded — you fetch what you want to read, with fetch_full_text or bash.`,
     "",
@@ -504,7 +519,9 @@ async function main() {
     `Never refer to papers by candidate index numbers in the intro/reasons/outro — use titles.`,
     `The papers array order IS the email card order — stronger work first.`,
     `You have up to ${maxSteps} tool-call steps. When done, call submit_digest.`,
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   await session.prompt(initialPrompt);
   // prompt() resolves once the message is accepted, not when the agent

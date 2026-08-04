@@ -258,13 +258,13 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
         note_html = (
             f'<div style="margin-top:10px;font-size:13px;color:#4c1d95;'
             f'background:#f5f3ff;border-left:4px solid #a855f7;padding:10px 16px;'
-            f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(_strip_markdown(reason))}</div>'
+            f'border-radius:6px;"><strong>{why_label}:</strong> {_safe(_strip_markdown(_mathify(reason)))}</div>'
         )
     elif tldr:
         note_html = (
             f'<div style="margin-top:12px;padding:10px 14px;border-left:4px solid #2563eb;'
             f'background:#f8fafc;border-radius:6px;font-size:14px;color:#374151;line-height:1.55;">'
-            f'<strong>{tldr_label}:</strong> {_safe(_strip_markdown(tldr))}</div>'
+            f'<strong>{tldr_label}:</strong> {_safe(_strip_markdown(_mathify(tldr)))}</div>'
         )
 
     buttons = ""
@@ -353,7 +353,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
         meta = others_map.get(orig_index, {})
         work_score = meta.get("work_score")
         chips = _rate_html(p.score, language) + " " + _work_html(work_score, language, fallback_na=True)
-        note = _safe(_strip_markdown(meta.get("note", "")))
+        note = _safe(_strip_markdown(_mathify(meta.get("note", ""))))
         note_html = f'<div style="margin-top:4px;font-size:12px;color:#6b7280;line-height:1.45;">{note}</div>' if note else ""
         border = "border-bottom:1px solid #f3f4f6;" if i < len(papers) - 1 else ""
         rows += (
@@ -369,7 +369,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
             f'<div style="font-size:13px;color:#374151;line-height:1.6;'
             f'background:#f8fafc;border-left:4px solid #9ca3af;padding:8px 14px;'
             f'border-radius:6px;margin-bottom:8px;">'
-            f'{_safe(_strip_markdown(others_summary))}</div>'
+            f'{_safe(_strip_markdown(_mathify(others_summary)))}</div>'
         )
     return (
         f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'

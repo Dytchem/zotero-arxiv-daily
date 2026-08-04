@@ -86,6 +86,49 @@ def test_render_email_relevance_none_is_defensive():
     assert "Relevance: n/a" in html
 
 
+def test_mathify_notes_and_reasons_rendered():
+    """Regression: agent notes/reasons must go through _mathify too.
+
+    After the ROLE slim the agent started writing LaTeX math in its prose
+    (e.g. $\\Delta t=0.01$). Those fields were only _strip_markdown'd, so raw
+    `$...$` leaked into the HTML. Verify cards + others render them clean.
+    """
+    from zotero_arxiv_daily.construct_email import render_email
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    digest = Digest(
+        subject="test",
+        intro="",
+        papers=[DigestPaper(index=0, reason="quench with $\\Delta t=0.01$ a.u.", work_score=8.0)],
+        others_summary="",
+    )
+    html = render_email(digest, originals=[_paper(0, score=3.0)], language="Chinese")
+    assert "$\\Delta" not in html
+    assert "Δt=0.01" in html
+
+
+def test_mathify_others_note_rendered():
+    """Others-section notes must also pass through _mathify."""
+    from zotero_arxiv_daily.construct_email import render_email
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    digest = Digest(
+        subject="test",
+        intro="",
+        papers=[DigestPaper(index=0, reason="r", work_score=8.0)],
+        others=[{"index": 1, "work_score": 4.0, "note": "HSE gives $0.34$ vs PBE $0.94$"}],
+        others_summary="",
+    )
+    html = render_email(
+        digest,
+        originals=[_paper(0, score=3.0), _paper(1, score=2.0, title="Paper B")],
+        language="Chinese",
+        candidate_count=2,
+    )
+    assert "$0.34$" not in html
+    assert "0.34" in html
+
+
 def test_render_email_note_only_one():
     """When both reason and tldr are present, only the Why note is shown."""
     digest = Digest(

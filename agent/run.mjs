@@ -648,10 +648,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Custom provider lives in models.json (apiKey=$OPENAI_API_KEY, baseUrl=OpenRouter).
-  // 编程式创建 provider（从环境变量读 baseUrl 和 apiKey），不使用内置 provider
-  const { createProvider } = await import("@earendil-works/pi-ai");
-  const { envApiKeyAuth } = await import("@earendil-works/pi-ai/auth/helpers");
+  // Custom provider: 从环境变量读 baseUrl 和 apiKey，不使用内置 provider（避免 mimo 被调用）
+  const { createProvider, envApiKeyAuth } = await import("@earendil-works/pi-ai");
   const { openAICompletionsApi } = await import("@earendil-works/pi-ai/api/openai-completions.lazy");
 
   // 创建 ModelRuntime（会加载内置 provider catalog）
@@ -661,14 +659,14 @@ async function main() {
   runtime.builtins.clear();
   runtime.models.clearProviders();
 
-  // 从环境变量读 baseUrl（用户的 OPENAI_API_BASE，不是硬编码 openrouter）
+  // 从环境变量读 baseUrl 和 apiKey
   const baseUrl = process.env.OPENAI_API_BASE || "https://api.openai.com/v1";
 
   // 创建自定义 provider
   const customProvider = createProvider({
     id: "custom",
     baseUrl,
-    auth: envApiKeyAuth("openai", ["OPENAI_API_KEY"]),
+    auth: envApiKeyAuth("API key", ["OPENAI_API_KEY"]),
     models: [
       {
         id: modelId,

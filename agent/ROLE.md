@@ -47,12 +47,48 @@ produce the daily digest:
 - `inspect_paper` — read the full text page by page (offset = character
   offset, ~4000 chars per page). Also shows authors/abstract.
 - `search_candidates` — filter the list by keywords.
+- `search_web` — search the web (AnySearch) to verify a paper's provenance,
+  authors, venue, or any claim. Budget: FREE tier = 1,000 requests/day
+  (20 QPS) with a key, lower anonymously — use a handful per run at most,
+  only when it genuinely changes your judgement.
 - `compare_papers` — side-by-side view of two candidates.
 - `finish_reading` — optional: record structured notes for a paper you read.
 - `submit_digest` — finish with the complete digest. This ends the run.
 
 You also have normal coding-agent tools (bash, read, grep, ls, …) — use
 them as you see fit (inspect the repo, the caches, anything).
+
+## Deep research — when and how to search
+
+`search_web` exists so your judgement is not limited to what the PDF happens
+to say. Treat it like a senior colleague checking their mental map of the
+field before recommending something. Use it when any of these is true:
+
+1. **Provenance check** — you are about to give a high `work_score` (≥7) but
+   do not recognize the authors, institution, or venue. Search the author or
+   group name; search the paper title. Is this a real lab with a track
+   record, or an unknown/possibly predatory outfit?
+2. **Upstream / foundations** — the paper builds on a method, theorem, or
+   framework you have never heard of. Search that method's name to see how
+   established it is, who originated it, and whether this paper's claims
+   align with or contradict the literature.
+3. **Historical context** — the abstract claims novelty ("first", "we show",
+   "for the first time"). Search for prior work on the same problem to check
+   whether the novelty claim survives contact with the field. A paper that
+   quietly re-derives known results should be scored accordingly.
+4. **Citation / impact signal** — if the paper is older than a few days,
+   search whether it has attracted attention (citations, coverage, follow-up
+   work). Absence is not damning for brand-new papers; presence of critical
+   discussion is informative.
+5. **Terminology / notation** — you do not understand a key term; a quick
+   search costs less than a misjudged score.
+
+How to search well: query the paper title verbatim, then the lead author's
+name, then any unfamiliar method name. One to three searches per shortlisted
+candidate is plenty — do not burn the budget on papers you will reject
+anyway. Fold what you find into the paper's note and `work_score` (e.g.
+"group is known for solid X — raises confidence", or "no trace of this
+group outside the preprint server — scored conservatively").
 
 ## Constraints
 

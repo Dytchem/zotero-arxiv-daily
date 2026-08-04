@@ -108,7 +108,8 @@ arXiv/bioRxiv/medRxiv feeds          Your Zotero library
 | 🎯 **Taste-aware selection** | The research profile distills not just topics but the researcher's *taste* and quality bar; picks are matched to it, not just to keyword overlap |
 | ⚡ **Prompt-cache friendly** | The agent loop marks its stable system prompt with a prompt-cache breakpoint, so repeated turns hit the provider's cache (lower cost, lower latency) |
 | 🧱 **Fixed subject format** | The email subject is a stable `Zotero-arXiv-Daily … · <date>` — scannable, never free-form |
-| 🔧 **Real tool-use loop** | `inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest`, with a hard submit gate (≥3 inspections) |
+| 🔧 **Real tool-use loop** | The agent drives its own research: `inspect_candidates` → `fetch_full_text` (it fetches papers itself) → `inspect_paper` (paged) → `search_candidates` / `search_web` → `compare_papers` → `submit_digest`. It decides what to read and how deeply — no scripted pipeline |
+| 🌐 **Deep research** | `search_web` (AnySearch) lets the agent check a paper's provenance — authors, institution, venue, upstream methods, prior art on the novelty claim — before scoring (free tier: 1,000 requests/day) |
 | ⚖️ **Generator + Evaluator** | An independent reviewer grades every draft (score, issues, approve/revise); `revise` feeds issues back, capped at `max_revisions` |
 | 📝 **Structured output** | The agent submits a typed `Digest` (subject / intro / papers / outro); the render layer trusts only the structure, never raw LLM text |
 | 🛡️ **Safe rendering** | Every text field HTML-escaped, LaTeX → Unicode (`$\alpha$` → `α`), links whitelisted to http(s) |
@@ -268,9 +269,10 @@ agent could not judge), plus an agent-written note on why they were skipped.
          │            │  inspect_candidates      │   read, fetches full
          │            │  fetch_full_text (bash)  │   texts itself, pages
          │            │  inspect_paper (paged)   │   through them, scores
-         │            │  search_candidates       │   every candidate, and
-         │            │  compare_papers          │   submits the digest
-         │            │  submit_digest           │
+         │            │  search_candidates       │   every candidate,
+         │            │  search_web (AnySearch)  │   deep-researches
+         │            │  compare_papers          │   provenance when
+         │            │  submit_digest           │   needed, and submits
          │            └──────────┬───────────────┘
          │                       │  digest JSON
          │                       ▼

@@ -108,7 +108,8 @@ arXiv/bioRxiv/medRxiv 订阅源        你的 Zotero 文献库
 | 🎯 **品味匹配** | 研究画像不仅提炼主题，还提炼研究者的 *品味* 与质量底线；选稿不仅看关键词重合，更看是否符合你的口味 |
 | ⚡ **提示词缓存友好** | agent 循环给稳定的系统提示词打上 prompt-cache 断点，多轮对话命中供应商缓存 —— 更省 token、更低延迟 |
 | 🧱 **固定邮件标题** | 邮件主题是固定的 `Zotero-arXiv-Daily … · <日期>` —— 可扫读，绝不自由发挥 |
-| 🔧 **真正的工具调用循环** | `inspect_candidates` → `inspect_paper` → `search_candidates` → `compare_papers` → `submit_digest`，带硬性提交门禁（至少深挖 3 篇） |
+| 🔧 **真正的工具调用循环** | 智能体自主研究：`inspect_candidates` → `fetch_full_text`（自己抓论文）→ `inspect_paper`（分页）→ `search_candidates` / `search_web` → `compare_papers` → `submit_digest`。读哪篇、读多深由它自己决定——没有脚本化流水线 |
+| 🌐 **深度调研** | `search_web`（AnySearch）让智能体在打分前核查论文出处——作者、机构、期刊/平台、上游方法、新颖性主张的先前工作（免费额度：每天 1,000 次） |
 | ⚖️ **生成 + 评审双智能体** | 独立评审器给每份草稿打分（分数/问题/通过与否）；`revise` 会把问题反馈给生成器修订，最多 `max_revisions` 轮 |
 | 📝 **结构化输出** | 智能体提交类型化的 `Digest`（主题 / 开场 / 论文 / 结尾）；渲染层只信任结构，绝不信任 LLM 原文 |
 | 🛡️ **安全渲染** | 所有文本字段 HTML 转义，LaTeX 公式转 Unicode（`$\alpha$` → `α`），链接只放行 http(s) |
@@ -259,8 +260,9 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
          │            │  agent 自有的工具：        │   它自己决定读哪篇、
          │            │  inspect_candidates       │   自己抓全文（bash）、
          │            │  fetch_full_text (bash)  │   分页精读、给每个候选
-         │            │  inspect_paper（分页）     │   打分，最后提交 digest
-         │            │  search_candidates        │
+         │            │  inspect_paper（分页）     │   打分、必要时深度调研
+         │            │  search_candidates        │   出处，最后提交 digest
+         │            │  search_web (AnySearch)  │
          │            │  compare_papers           │
          │            │  submit_digest            │
          │            └──────────┬───────────────┘

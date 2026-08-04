@@ -247,6 +247,58 @@ function buildTools(ctx) {
       },
     },
     {
+      name: "search_web",
+      label: "Search the web",
+      description:
+        "Search the web (AnySearch API) for background on a paper, authors, institution, venue, or any claim you want to verify before judging work quality. Useful to check provenance, citations, or whether a result is well known. Budget note: FREE tier = 1,000 requests/day (20 QPS) with an API key, lower limits anonymously; each digest run should use at most a handful of searches, and only when it genuinely changes your judgement.",
+      parameters: Type.Object({
+        query: Type.String({ description: "what to search for, e.g. the paper title, an author, or a claim to verify" }),
+        max_results: Type.Optional(
+          Type.Integer({ default: 5, minimum: 1, maximum: 10, description: "how many results to return" })
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        toolLog("TOOL", params);
+        const q = String(params.query || "").trim();
+        if (!q) return textResult("Empty query.");
+        const maxResults = Math.min(Math.max(params.max_results ?? 5, 1), 10);
+        const apiKey = process.env.ANYSEARCH_API_KEY || "";
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 30000);
+          const resp = await fetch("https://api.anysearch.com/v1/search", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify({ query: q, max_results: maxResults, content_types: ["web"] }),
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (!resp.ok) {
+            return textResult(`search_web failed: HTTP ${resp.status} ${(await resp.text()).slice(0, 200)}`);
+          }
+          const data = await resp.json();
+          const items = (data.data || data.results || []).slice(0, maxResults);
+          if (!items.length) {
+            return textResult(`No web results for "${q}".`);
+          }
+          const lines = items.map((r, i) => {
+            const title = r.title || r.name || "(no title)";
+            const url = r.url || r.link || "";
+            const snippet = (r.snippet || r.content || "").slice(0, 300);
+            return `${i + 1}. ${title}\n   ${url}\n   ${snippet}`;
+          });
+          return textResult(`Web results for "${q}":\n\n` + lines.join("\n\n"));
+        } catch (err) {
+          return textResult(
+            `search_web error: ${String(err.message || err).slice(0, 300)}`
+          );
+        }
+      },
+    },
+    {
       name: "search_candidates",
       label: "Search candidates",
       description:

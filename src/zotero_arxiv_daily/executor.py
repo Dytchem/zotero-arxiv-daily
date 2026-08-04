@@ -393,10 +393,14 @@ class Executor:
             if proc.returncode != 0:
                 logger.warning(f"Pi agent exited {proc.returncode}: {proc.stderr[-500:]}")
                 return None
-            # On success, keep the agent's own tool log (stderr) at debug level
-            # so a workflow run with DEBUG=true can replay what the agent did.
+            # Keep the agent's own tool log (stderr) + final summary (stdout)
+            # visible in the workflow log at INFO level — the owner reviews
+            # the daily run there, and DEBUG mode skips sending so it cannot
+            # be used for a real send test.
             if proc.stderr.strip():
-                logger.debug(f"Pi agent log:\n{proc.stderr[-3000:]}")
+                logger.info(f"Pi agent tool log:\n{proc.stderr[-12000:]}")
+            if proc.stdout.strip():
+                logger.info(f"Pi agent stdout:\n{proc.stdout.strip()[-2000:]}")
             if not out_path.exists():
                 logger.warning("Pi agent finished without writing a digest")
                 return None
@@ -572,6 +576,7 @@ class Executor:
         t0 = time.time()
         corpus = self.fetch_zotero_corpus()
         corpus = self.filter_corpus(corpus)
+        logger.info(f"[stage:corpus] {len(corpus)} papers after path filters ({time.time() - t0:.1f}s)")
         if len(corpus) == 0:
             # Fail loudly instead of silently skipping the email: an empty corpus
             # almost always means broken Zotero credentials / filters, and the
@@ -588,6 +593,7 @@ class Executor:
         source_failures: list[str] = []
         for source, retriever in self.retrievers.items():
             logger.info(f"Retrieving {source} papers...")
+            t_ret = time.time()
             try:
                 papers = retriever.retrieve_papers()
             except Exception as exc:
@@ -597,20 +603,29 @@ class Executor:
             if len(papers) == 0:
                 logger.info(f"No {source} papers found")
                 continue
-            logger.info(f"Retrieved {len(papers)} {source} papers")
+            logger.info(f"Retrieved {len(papers)} {source} papers ({time.time() - t_ret:.1f}s)")
             all_papers.extend(papers)
 
+        n_before_dedupe = len(all_papers)
         all_papers = self._dedupe_papers(all_papers)
-        logger.info(f"Total {len(all_papers)} papers retrieved from all sources")
+        n_after = len(all_papers)
+        logger.info(f"[stage:retrieve] {n_before_dedupe} raw -> {n_after} after dedupe ({time.time() - t0:.1f}s)")
 
         ranked: list[Paper] = []
         if all_papers:
             logger.info("Reranking papers (embedding + BM25)...")
+            t_rr = time.time()
             ranked = self.reranker.rerank(all_papers, corpus)
+            logger.info(f"[stage:rerank] {len(ranked)} scored ({time.time() - t_rr:.1f}s)")
             ranked = self._filter_min_score(ranked)
             ranked = self._filter_keywords(ranked)
             ranked = self._filter_sent_history(ranked)
             ranked = ranked[: int(self.config.executor.get("max_paper_num", 100))]
+            cap = self.config.executor.get("max_paper_num", 100)
+            logger.info(f"[stage:filter] {len(ranked)} candidates survive filters (max_paper_num={cap})")
+            if ranked:
+                top = ranked[0]
+                logger.info(f"[stage:filter] top candidate: score={top.score:.2f} {top.title}")
             # Best-effort fetch full text for top candidates before the agent runs,
             # so its inspect_paper tool has something to show. The Pi engine
             # fetches full texts ITSELF (fetch_full_text tool / bash) — the
@@ -629,7 +644,9 @@ class Executor:
             return
 
         logger.info("Harness agent producing digest...")
+        t_agent = time.time()
         digest = self._agent_digest(ranked, corpus)
+        logger.info(f"[stage:agent] digest produced in {time.time() - t_agent:.1f}s")
 
         # Decide which papers were actually recommended (for sent-history).
         if digest and digest.papers:

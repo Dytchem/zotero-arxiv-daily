@@ -56,6 +56,20 @@ function toolLog(name, params) {
   console.error(`[tool] ${name} ${brief}`);
 }
 
+// Wraps a tool's execute() to log elapsed time per call — the workflow log
+// then shows exactly how long each agent step (and each fetch) took.
+function timed(tool) {
+  const exec = tool.execute;
+  tool.execute = async (...args) => {
+    const t0 = Date.now();
+    const result = await exec(...args);
+    const dt = Date.now() - t0;
+    console.error(`[tool:done] ${tool.name} ${dt}ms`);
+    return result;
+  };
+  return tool;
+}
+
 // ---------------------------------------------------------------------------
 // Custom tools (closure over the loaded candidates/profile)
 // ---------------------------------------------------------------------------
@@ -553,7 +567,7 @@ function buildTools(ctx) {
       },
     },
   ];
-  return tools;
+  return tools.map(timed);
 }
 
 // ---------------------------------------------------------------------------

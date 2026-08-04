@@ -28,6 +28,7 @@ def main() -> int:
     url = sys.argv[1]
     pdf_url = sys.argv[2] if len(sys.argv) > 2 else None
     source_url = sys.argv[3] if len(sys.argv) > 3 else None
+    print(f"fetch_text: trying tar -> html -> pdf for {url}", file=sys.stderr)
     paper = Paper(
         source="arxiv",
         title="",
@@ -43,6 +44,7 @@ def main() -> int:
         or extract_text_from_pdf(paper)
     )
     if text:
+        print(f"fetch_text: extracted {len(text)} chars", file=sys.stderr)
         sys.stdout.write(text)
         return 0
     print(f"fetch_text: no extractable full text for {url}", file=sys.stderr)

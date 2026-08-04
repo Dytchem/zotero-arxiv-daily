@@ -88,6 +88,11 @@ function buildTools(ctx) {
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Used for the soft finish_reading nudge.
   const readDepth = new Map();
+  // Indices the agent has actually engaged with (fetched / inspected /
+  // summarized / finished). Used to surface already-read papers FIRST in
+  // inspect_candidates / inspect_pool so the agent sees at a glance what it
+  // has covered and what is left — while pool indices stay stable.
+  const readSet = new Set();
   // Structured reading notes: candidate index -> {methods, experiments,
   // results, limitations, confidence}. Optional intermediate artifact —
   // scoring and recommendations are expected to be grounded in these, but
@@ -143,22 +148,28 @@ function buildTools(ctx) {
         toolLog("inspect_candidates", params);
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 20, 50);
-        const slice = candidates.slice(start, start + count);
-        const lines = slice.map((p, i) => {
-          const idx = start + i;
+        const total = candidateCount;
+        // Already-read papers float to the top of every page (indices stay
+        // stable — the READ mark is what changes, never the index).
+        const order = [...Array(total).keys()].sort(
+          (a, b) => Number(readSet.has(b)) - Number(readSet.has(a)) || a - b
+        );
+        const slice = order.slice(start, start + count);
+        const lines = slice.map((idx) => {
+          const p = candidates[idx];
           const authors = (p.authors || []).slice(0, 8).join(", ");
           const ab = p.abstract || "";
           const abShort = ab.length > 400 ? ab.slice(0, 400) + "…" : ab;
-          return `${idx}. [score ${p.score ?? "?"}] ${p.title}\n   ${authors}\n   ${abShort}`;
+          const read = readSet.has(idx) ? "[READ] " : "";
+          return `${idx}. ${read}[score ${p.score ?? "?"}] ${p.title}\n   ${authors}\n   ${abShort}`;
         });
-        const total = candidateCount;
         const end = Math.min(start + count, total);
         const more =
           end < total
             ? `\n\nMore candidates: call inspect_candidates with start=${end}`
             : `\n\n(end of candidate list — ${total} candidates; use inspect_pool to see the full pool of ${pool.length})`;
         return textResult(
-          `Candidates ${start}-${end - 1} of ${total}:\n\n` +
+          `Candidates ${start}-${end - 1} of ${total} (read papers listed first):\n\n` +
             lines.join("\n\n") +
             more
         );
@@ -185,24 +196,29 @@ function buildTools(ctx) {
         toolLog("inspect_pool", params);
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 20, 50);
-        const slice = candidates.slice(start, start + count);
-        const lines = slice.map((p, i) => {
-          const idx = start + i;
+        const total = candidates.length;
+        // Same read-first ordering as inspect_candidates; indices stay stable.
+        const order = [...Array(total).keys()].sort(
+          (a, b) => Number(readSet.has(b)) - Number(readSet.has(a)) || a - b
+        );
+        const slice = order.slice(start, start + count);
+        const lines = slice.map((idx) => {
+          const p = candidates[idx];
           const tag = idx < candidateCount ? "[candidate]" : "[pool]";
           const authors = (p.authors || []).slice(0, 6).join(", ");
           const ab = p.abstract || "";
           const abShort = ab.length > 300 ? ab.slice(0, 300) + "…" : ab;
           const sc = p.score != null ? `score ${p.score.toFixed(2)}` : "unscored";
-          return `${idx}. ${tag} ${sc} — ${p.title}\n   ${authors}\n   ${abShort}`;
+          const read = readSet.has(idx) ? "[READ] " : "";
+          return `${idx}. ${read}${tag} ${sc} — ${p.title}\n   ${authors}\n   ${abShort}`;
         });
-        const total = candidates.length;
         const end = Math.min(start + count, total);
         const more =
           end < total
             ? `\n\nMore: call inspect_pool with start=${end}`
             : "\n\n(end of pool)";
         return textResult(
-          `Full pool ${start}-${end - 1} of ${total} (first ${candidateCount} are candidates):\n\n` +
+          `Full pool ${start}-${end - 1} of ${total} (first ${candidateCount} are candidates; read papers listed first):\n\n` +
             lines.join("\n\n") +
             more
         );
@@ -218,6 +234,7 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("fetch_full_text", params);
+        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (p.full_text) {
@@ -313,6 +330,7 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("inspect_paper", params);
+        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (!p.full_text) {
@@ -498,6 +516,7 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("summarize_paper", params);
+        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const full = p.full_text || "";
@@ -560,6 +579,7 @@ function buildTools(ctx) {
       required: ["index", "methods", "experiments", "limitations", "confidence"],
       execute: async (_toolCallId, params) => {
         toolLog("finish_reading", params);
+        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const read = readDepth.get(params.index) || 0;

@@ -27,7 +27,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 2. **Pulls the newest papers** from arXiv, bioRxiv and medRxiv.
 3. **Shortlists candidates** with fast deterministic math (embeddings + BM25 + recency).
 4. **Lets an autonomous agent decide** — it browses the *full pool* of today's papers (not just the pre-filtered list), fetches full texts itself, reads them (delegating long papers to a sub-agent), verifies provenance online, and scores each paper's **Recommendation** (0–10).
-5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Recommendation** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped.
+5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Recommendation** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped, **papers the agent actually read and annotated listed first**.
 
 **The math ranks; the agent decides.** Embedding scores are hints, not verdicts.
 
@@ -37,7 +37,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 - **Full-pool visibility** — the agent sees every deduplicated paper from today's fetch, including ones the keyword/min-score/max-count filters dropped. A high-value paper that the heuristics missed can still be rescued, read and recommended — and it shows up in the email with a "pool" note.
 - **Recommendation scoring** — every candidate (picked or not) gets a **Recommendation** badge (0–10) judging rigour, novelty and provenance. Weak papers are called out even when they look on-topic.
 - **Defensible ordering** — stronger work first; the reader can compare the badges.
-- **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended. Long papers are delegated to a sub-agent so nothing is skipped.
+- **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended. Long papers are delegated to a sub-agent that reads the **entire full text in one pass** (no fragmentary chunking), so nothing is skipped and cross-section connections survive. Already-read papers float to the top of the agent's candidate/pool lists tagged `[READ]` (pool indices stay stable).
 - **Cost-conscious by design** — the agent scores the whole pool from abstracts first and deep-reads only the shortlist (~8 papers), so a daily run costs well under $0.20; long-paper sub-agent reads the full text in one pass. No hard limits — the agent can always read more if it needs to.
 - **Safe rendering** — every text field HTML-escaped, LaTeX→Unicode, links whitelisted. The agent writes JSON, never markup.
 - **Provider-safe by design** — the LLM provider is created programmatically from `OPENAI_API_BASE` + `OPENAI_API_KEY` with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.

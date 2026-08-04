@@ -75,11 +75,10 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath, cacheDir, maxSteps, fullTextCacheMax, webSearchBudget, model } = ctx;
+  const { candidates, profile, language, digestPath, cacheDir, fullTextCacheMax, model } = ctx;
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
-  // read via inspect_paper. Guarantees the agent READ the papers it recommends
-  // instead of skimming titles/abstracts.
+  // read via inspect_paper. Used for the soft finish_reading nudge.
   const readDepth = new Map();
   // Structured reading notes: candidate index -> {methods, experiments,
   // results, limitations, confidence}. Optional intermediate artifact —
@@ -91,16 +90,6 @@ function buildTools(ctx) {
   // texts fetched by either side are reused by the other. Located under the
   // configured cache_dir (default .cache) — same file the Python side uses.
   const fullTextCachePath = path.join(cacheDir, "full_texts.json");
-  // Hard step budget: the SDK has no maxSteps option, so we count tool
-  // invocations ourselves and refuse to continue past the budget — the
-  // agent must submit (or the run ends and the Python side falls back).
-  let stepsUsed = 0;
-  const budgetExceeded = () => stepsUsed >= maxSteps;
-  const stepMessage =
-    `Step budget exhausted (${maxSteps} steps). You must call submit_digest NOW with what you have — no more tools.`;
-  // Web-search quota: FREE tier is limited; cap per-run usage so a runaway
-  // agent cannot burn the budget on trivia.
-  let webSearchesUsed = 0;
 
   const tools = [
     {
@@ -122,8 +111,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const start = params.start ?? 0;
         const count = Math.min(params.count ?? 20, 50);
         const slice = candidates.slice(start, start + count);
@@ -157,8 +144,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         if (p.full_text) {
@@ -254,8 +239,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         if (!p.full_text) {
@@ -322,17 +305,8 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const q = String(params.query || "").trim();
         if (!q) return textResult("Empty query.");
-        if (webSearchesUsed >= webSearchBudget) {
-          return textResult(
-            `search_web quota exhausted (${webSearchBudget} searches this run). ` +
-              `Stop searching — judge from the papers themselves.`
-          );
-        }
-        webSearchesUsed++;
         const maxResults = Math.min(Math.max(params.max_results ?? 5, 1), 10);
         const apiKey = process.env.ANYSEARCH_API_KEY || "";
         try {
@@ -380,8 +354,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const q = (params.query || "").toLowerCase().trim();
         if (!q) return textResult("Empty query.");
         const hits = [];
@@ -409,8 +381,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const a = candidates[params.index_a];
         const b = candidates[params.index_b];
         if (!a || !b) return textResult("One of the indexes is out of range.");
@@ -432,8 +402,6 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const full = p.full_text || "";
@@ -498,8 +466,6 @@ function buildTools(ctx) {
       required: ["index", "methods", "experiments", "limitations", "confidence"],
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
-        if (budgetExceeded()) return textResult(stepMessage);
-        stepsUsed++;
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
         const read = readDepth.get(params.index) || 0;
@@ -647,10 +613,8 @@ async function main() {
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
-  const maxSteps = input.max_steps ?? 300;
   const cacheDir = input.cache_dir || path.join(AGENT_DIR, "..", ".cache");
   const fullTextCacheMax = input.full_text_cache_max ?? 200;
-  const webSearchBudget = input.web_search_budget ?? 15;
   const digestPath = args.output;
 
   if (!candidates.length) {
@@ -702,9 +666,7 @@ async function main() {
     language,
     digestPath,
     cacheDir,
-    maxSteps,
     fullTextCacheMax,
-    webSearchBudget,
     model,
   });
 
@@ -740,7 +702,7 @@ async function main() {
     "## Constraints",
     `Never refer to papers by candidate index numbers in the intro/reasons/outro — use titles.`,
     `The papers array order IS the email card order — stronger work first.`,
-    `You have up to ${maxSteps} tool-call steps. When done, call submit_digest.`,
+    `No step limit: keep reading and searching until you have enough to judge the batch well. When done, call submit_digest.`,
   ]
     .filter(Boolean)
     .join("\n\n");

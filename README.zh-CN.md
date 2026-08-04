@@ -51,7 +51,7 @@
    - `ZOTERO_ID`、`ZOTERO_KEY` —— 你的 Zotero 用户 ID 和 API key
    - `OPENAI_API_KEY`、`OPENAI_API_BASE` —— LLM API key + 地址（推荐 OpenRouter）
    - `SENDER`、`RECEIVER`、`SENDER_PASSWORD` —— SMTP 邮箱凭据
-   - *可选：* `ANYSEARCH_API_KEY`（提高 `search_web` 速率上限）
+   - *可选但建议：* `ANYSEARCH_API_KEY` —— 在 [AnySearch](https://anysearch.com/console/api-keys) 免费注册的 API key，供 `search_web` 工具使用。agent 用它核实论文出处（作者、机构、新颖性声明）。**不配置也能匿名使用，但 GitHub Actions 共享 runner IP 很容易被限流，搜索可能失败**，拖慢 agent；配置后享有 1000 次/天（20 QPS）。
    - 设置 **Variable** `CUSTOM_CONFIG` —— YAML 覆写配置，含你的 arXiv 分类和 reranker（参考仓库里的 `config/custom.yaml`）
 3. **运行** —— 工作流每天 22:00 UTC（北京时间 06:00，正好在 arXiv 发布后）自动执行。随时手动触发：*Actions → Send emails daily → Run workflow*。测试发信用 **Run workflow → `reset_history` = true**。
 

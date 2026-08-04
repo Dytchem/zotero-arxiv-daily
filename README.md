@@ -51,7 +51,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
    - `ZOTERO_ID`, `ZOTERO_KEY` — your Zotero user ID and API key
    - `OPENAI_API_KEY`, `OPENAI_API_BASE` — an LLM API key + base URL (OpenRouter recommended)
    - `SENDER`, `RECEIVER`, `SENDER_PASSWORD` — SMTP credentials
-   - *Optional:* `ANYSEARCH_API_KEY` (raises `search_web` rate limits)
+   - *Optional but recommended:* `ANYSEARCH_API_KEY` — a free [AnySearch](https://anysearch.com/console/api-keys) API key for `search_web`. The agent uses web search to verify paper provenance (authors, venue, novelty claims). **Without a key it still works via anonymous access, but the shared GitHub runner IP is easily rate-limited and searches may fail**, which slows the agent down. With a key you get 1,000 requests/day (20 QPS).
    - Set the **Variable** `CUSTOM_CONFIG` — a YAML override with your arXiv categories and reranker (see `config/custom.yaml` in the repo)
 3. **Run** — the workflow fires daily at 22:00 UTC (06:00 Beijing, right after arXiv's release). Trigger manually anytime: *Actions → Send emails daily → Run workflow*. Use **Run workflow → `reset_history` = true** for a test send.
 

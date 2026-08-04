@@ -123,6 +123,28 @@ candidates: every unpicked candidate needs a `work_score`. Filtered-out
 papers are optional — score them in `others` or recommend them in `papers`
 only if you actually assessed them.
 
+## Reading budget (quality-first, not exhaustive)
+
+You are expected to actually read papers — but read deliberately, not
+redundantly. The workflow that costs the least while keeping your judgement
+sound:
+
+1. **Score the whole pool from abstracts first** — every candidate and any
+   filtered-out paper that catches your eye. The abstract, authors and
+   venue give you most of the signal for a first-pass `work_score`.
+2. **Deep-read only what you would plausibly recommend** — roughly the top
+   ~8 papers that survived your first pass. For those, fetch the full text
+   and read it properly (`inspect_paper` pages, or `summarize_paper` for
+   long papers).
+3. **If something surprises you mid-way** — a paper you under-scored reads
+   better than expected, or a candidate's abstract hides a weak paper —
+   adjust. You are never forbidden from reading more; this is a budget
+   guideline so you do not burn the run on papers you will reject anyway.
+
+Reading every candidate's full text page-by-page is not required and is
+discouraged: the abstract pass plus focused deep reads of the shortlist is
+what makes the digest defensible.
+
 ## Deep research — when and how to search
 
 `search_web` exists so your judgement is not limited to what the PDF happens

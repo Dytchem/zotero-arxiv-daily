@@ -492,7 +492,7 @@ class HarnessAgent:
                                 "description": (
                                     "optional reference work_scores for candidates you "
                                     "inspected but did NOT recommend, so the reader gets "
-                                    "the same Work badge on them. Optional but recommended "
+                                    "the same Recommendation badge on them. Optional but recommended "
                                     "for anything you seriously considered."
                                 ),
                                 "items": {
@@ -660,7 +660,7 @@ class HarnessAgent:
             "be defensible. Sort primarily by work_score DESCENDING (the strongest "
             "work first); break ties by relevance, then by taste fit. A paper with "
             "higher work quality must NEVER appear below a clearly weaker one — the "
-            "reader will compare the Work badges and lose trust if the ordering looks "
+            "reader will compare the Recommendation badges and lose trust if the ordering looks "
             "arbitrary. Only an explicit taste rationale may move a slightly lower-"
             "scored paper above a slightly higher one, and you should say so in its "
             "reason.\n"
@@ -683,13 +683,13 @@ class HarnessAgent:
             "papers with inspect_paper; if you try to submit earlier you will be "
             "asked to keep working.\n"
             "8. OTHER CANDIDATES: the reader also sees the candidates you did not "
-            "pick, and every single one of them gets the same Work badge — so you "
+            "pick, and every single one of them gets the same Recommendation badge — so you "
             "must provide a work_score for EVERY unpicked candidate in the others "
             "array (all of them, not just the ones you inspected deeply; use the "
             "abstract/title evidence you already have and be honest about uncertainty). "
             "Also provide (a) an others_summary: a short overall comment (2-4 sentences) "
             "on why the rest were skipped and whether any is worth a skim. The reader "
-            "will see a missing Work badge as n/a, which looks sloppy — cover them all.\n\n"
+            "will see a missing Recommendation badge as n/a, which looks sloppy — cover them all.\n\n"
             "Quality bar: reasons should be specific and insightful, not generic. "
             "Never invent content that is not in the paper's abstract or full text. "
             "If nothing is worth recommending, submit an empty papers list with an "

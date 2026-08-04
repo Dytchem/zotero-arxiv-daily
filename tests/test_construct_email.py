@@ -58,7 +58,7 @@ def test_render_email_shows_work_score_badge():
     )
     html = render_email(digest, originals=[_paper(0, score=7.5)])
     assert "Relevance: 7.5" in html
-    assert "Work: 8.4" in html
+    assert "Recommendation: 8.4" in html
 
 
 def test_render_email_work_score_chinese_label():
@@ -68,7 +68,7 @@ def test_render_email_work_score_chinese_label():
         outro="",
     )
     html = render_email(digest, originals=[_paper(0)], language="Chinese")
-    assert "工作水平: 6.2" in html
+    assert "推荐度: 6.2" in html
     assert "相关度" in html
 
 
@@ -77,7 +77,7 @@ def test_render_email_work_score_none_hides_badge():
     digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
     html = render_email(digest, originals=[_paper(0, score=7.5)])
     assert "Relevance: 7.5" in html
-    assert "Work:" not in html
+    assert "Recommendation:" not in html
 
 
 def test_render_email_relevance_none_is_defensive():
@@ -134,7 +134,7 @@ def test_render_email_others_have_badges_on_own_line():
     assert "solid but incremental" in html
     # unpicked candidate 1 has both badges
     assert "Relevance: 5.0" in html
-    assert "Work: 6.5" in html
+    assert "Recommendation: 6.5" in html
     # unpicked candidate 2 (no LLM score) still gets a Relevance chip
     assert "Relevance: 4.2" in html
 
@@ -173,7 +173,7 @@ def test_render_email_others_without_llm_score_show_na_badge():
         _paper(1, title="Not Picked One", score=5.0),
     ]
     html = render_email(digest, originals=originals)
-    assert "Work: n/a" in html
+    assert "Recommendation: n/a" in html
     assert "Relevance: 5.0" in html
 
 
@@ -418,8 +418,8 @@ def test_render_email_others_badges_aligned_when_picks_mid_list():
     html = render_email(digest, originals=originals, language="English")
 
     # Every unpicked paper gets its own correct badge + note (no n/a, no swap).
-    assert "Work: n/a" not in html
-    assert "Work: 6.0" in html and "Work: 5.0" in html and "Work: 4.0" in html
+    assert "Recommendation: n/a" not in html
+    assert "Recommendation: 6.0" in html and "Recommendation: 5.0" in html and "Recommendation: 4.0" in html
     assert "note-for-0" in html and "note-for-2" in html and "note-for-3" in html
     # The picked paper is NOT in the others section at all.
     assert "Paper 1" in html

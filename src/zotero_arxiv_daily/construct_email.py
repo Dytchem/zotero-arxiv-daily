@@ -166,12 +166,12 @@ def _rate_html(score: float | None, language: str = "English") -> str:
 
 
 def _work_html(score: float | None, language: str = "English", fallback_na: bool = False) -> str:
-    """Work-quality badge (LLM judgement of the paper's own merit) shown next
+    """Recommendation badge (LLM judgement of the paper's own merit) shown next
     to the relevance badge. Colored by tier so watery papers are visible at a
     glance: green >= 7, amber 5-7, red < 5. Missing score renders as n/a when
     ``fallback_na`` is set (other-candidates list: every paper keeps a badge
     slot); otherwise hidden (embedding-order fallback has no LLM judgement)."""
-    label = "工作水平" if language.lower().startswith("chinese") else "Work"
+    label = "推荐度" if language.lower().startswith("chinese") else "Recommendation"
     if score is None:
         if not fallback_na:
             # No LLM quality judgement (e.g. embedding-order fallback): hide the
@@ -295,7 +295,7 @@ def _footer_html(language: str) -> str:
 def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None) -> str:
     """Compact list of candidates the agent did not pick (bottom of the email).
 
-    Each entry shows the same Relevance + Work badges as the picked cards
+    Each entry shows the same Relevance + Recommendation badges as the picked cards
     (on their own line, below the title — never inline with the title), plus
     an optional per-paper note. An LLM-written overall summary is shown above
     the list when provided.
@@ -411,7 +411,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         cards = get_empty_html()
 
     # Remaining candidates (not picked by the agent) go at the bottom as a
-    # compact list — still visible, with the same Relevance + Work badges as
+    # compact list — still visible, with the same Relevance + Recommendation badges as
     # the picked cards plus the agent's overall comment on them. Pool papers
     # beyond the candidate list only appear here if the agent scored them
     # (rescued from the filter) — the rest of the pool stays hidden.

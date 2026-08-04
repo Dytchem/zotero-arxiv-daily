@@ -486,7 +486,7 @@ function buildTools(ctx) {
         }
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) return textResult("OPENAI_API_KEY not set; cannot run sub-agent. Use inspect_paper instead.");
-        const CHUNK = 8000;
+        const CHUNK = 16000;
         const chunks = [];
         for (let i = 0; i < full.length; i += CHUNK) chunks.push(full.slice(i, i + CHUNK));
         const baseUrl = (process.env.OPENAI_API_BASE || "https://openrouter.ai/api/v1").replace(/\/$/, "");
@@ -505,11 +505,10 @@ function buildTools(ctx) {
                 { role: "system", content: sys },
                 { role: "user", content: usr },
               ],
-              // Generous cap: the prompt asks for tight bullet notes, so a
-              // dense chunk should fit well under this. Never trim hard at
-              // 700 tokens — truncated notes lose the numbers the main agent
-              // needs to judge work quality.
-              max_tokens: 4096,
+              // Notes are dense bullet points; 2048 tokens is plenty and
+              // keeps the sub-agent output (and its cost) bounded while the
+              // main agent still gets all the numbers it needs.
+              max_tokens: 2048,
             }),
             signal: AbortSignal.timeout(60000),
           });

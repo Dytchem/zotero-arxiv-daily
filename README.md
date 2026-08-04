@@ -64,6 +64,16 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
 
 Full config reference: [`config/base.yaml`](config/base.yaml).
 
+## Real-world example (2026-08-04 test run)
+
+A full test send (`reset_history=true`) on 2026-08-04, on the free GitHub Actions runner:
+
+- **Input**: 2 Zotero library papers → 281 deduplicated arXiv papers fetched → 30 embedding-shortlisted candidates (the agent sees all 281 as the pool).
+- **Agent work**: fetched 13 full texts itself, delegated **10 long papers to the sub-agent (each read in full, one pass)**, paged through 16 deep reads, recorded 24 reading notes, ran 8 candidate searches + 4 provenance web searches.
+- **Email**: 6 recommended cards (Recommendation 7.5 → 6.2, descending) + 275 other candidates scored, **0 n/a**; analysed papers listed first in the "other candidates" block.
+- **Cost**: **$0.1245** for the whole run — main agent loop $0.064 (reasoning/writing) + full-text sub-agent reads $0.060 + embeddings $0.001; web search $0 (AnySearch). Prompt cache hit ~76%, peak context 125k tokens (no price-doubling tier).
+- **Runtime**: ~10 min end-to-end on the shared runner.
+
 ## Architecture
 
 ```

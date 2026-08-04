@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.9] - 2026-08-04
+
+### Changed
+- **全池可见（避免高价值论文被略去）**：agent 现在看到当天去重后的**全部**论文，不只是被 min_score/keyword/max_paper_num 过滤后的 top-N 候选。候选区（indices 0..candidate_count-1）信息更足（带 embedding score，排序靠前），其余论文在候选区之后（indices candidate_count..pool_size-1，标记 `[pool]`）。
+  - 新增 `inspect_pool` 工具：浏览全池（含候选标记 + score），分页。
+  - `search_candidates` 改为搜**全池**（不只候选），避免漏掉被过滤掉的高价值论文。
+  - `fetch_full_text` / `inspect_paper` / `compare_papers` / `finish_reading` / `summarize_paper` 的 index 基于 pool，可操作任意一篇当天论文。
+  - `submit_digest` 校验：others 全覆盖仅针对**候选区**（index < candidate_count）未选的论文；非候选论文可选评分（agent 觉得值得提就放 others，或直接进 papers 精选）。
+  - 初始 prompt 说明全池结构 + 可以推荐 filter 掉的论文。
+  - 邮件渲染：originals 传 pool，others 区显示候选未选 + agent 明确放进 others 的非候选（digest.others 中 index >= candidate_count 的）。
+  - sent_history 记录实际展示的论文（papers + others 区全部），避免明天重复发。
+  - ROLE.md 更新：工具列表 + 全池/候选说明 + others 覆盖语义。
+
 ## [1.5.8] - 2026-08-04
 
 ### Fixed

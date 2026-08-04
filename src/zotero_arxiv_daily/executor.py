@@ -269,7 +269,7 @@ class Executor:
     # The single LLM call site
     # ------------------------------------------------------------------
 
-    def _agent_digest(self, candidates: list[Paper], corpus: list[CorpusPaper]):
+    def _agent_digest(self, candidates: list[Paper], corpus: list[CorpusPaper], pool: list[Paper] | None = None):
         """Invoke the digest agent. Returns a Digest (may be a fallback).
 
         Engine selection: ``llm.harness.engine`` — "pi" (default) runs the Pi
@@ -277,10 +277,16 @@ class Executor:
         to the Python HarnessAgent when the Pi engine is unavailable or fails;
         "python" skips straight to the Python harness. Either way the pipeline
         degrades to a plain embedding-order digest before giving up.
+
+        ``pool`` (Pi engine only) is the FULL set of deduplicated papers from
+        today's fetch — the agent sees every paper, not just the filtered
+        candidates, so a high-value paper that the keyword/min-score filters
+        dropped can still be recommended. ``candidates`` must be the same
+        Paper objects (in pool order, first ``len(candidates)`` of the pool).
         """
         engine = (self.config.llm.get("harness") or {}).get("engine", "pi")
         if engine == "pi":
-            digest = self._agent_digest_pi(candidates, corpus)
+            digest = self._agent_digest_pi(candidates, corpus, pool=pool)
             if digest is not None:
                 return digest
             logger.warning("Pi agent engine failed; falling back to Python harness")
@@ -292,7 +298,7 @@ class Executor:
             digest = HarnessAgent.fallback_digest(candidates, max_n, language=language)
         return digest
 
-    def _agent_digest_pi(self, candidates: list[Paper], corpus: list[CorpusPaper]):
+    def _agent_digest_pi(self, candidates: list[Paper], corpus: list[CorpusPaper], pool: list[Paper] | None = None):
         """Run the Pi coding agent (agent/run.mjs) and return its Digest.
 
         The candidates + research profile are serialized to a JSON file, the
@@ -300,6 +306,11 @@ class Executor:
         ``submit_digest`` tool writes the digest JSON that we read back. Any
         failure (missing node, missing key, timeout, malformed digest) returns
         None so the caller falls back to the Python harness.
+
+        ``pool`` = ALL deduplicated papers from today's fetch. The agent gets
+        the full pool (candidates first, rest after), so it can browse
+        (inspect_pool), fetch full text, and even recommend papers that the
+        pre-filter (keyword/min-score/max_paper_num) dropped.
         """
         node = shutil.which("node")
         run_mjs = Path(__file__).resolve().parent.parent.parent / "agent" / "run.mjs"
@@ -329,6 +340,15 @@ class Executor:
         recent_corpus = sorted(
             corpus, key=lambda c: c.added_date, reverse=True
         )
+        # Full pool = ALL deduplicated papers from today's fetch (candidates
+        # first, in rerank order; the rest after). The agent sees the whole
+        # pool — not just the filtered candidates — so a high-value paper the
+        # keyword/min-score/max_paper_num filters dropped can still be
+        # recommended. Indexes in the digest refer to THIS pool.
+        if pool is None:
+            pool = candidates
+        candidate_urls = {p.url for p in candidates}
+        full_pool = list(candidates) + [p for p in pool if p.url not in candidate_urls]
         input_payload = {
             "model": agent.model,
             "language": agent.language,
@@ -353,7 +373,7 @@ class Executor:
                 }
                 for c in recent_corpus
             ],
-            "candidates": [
+            "pool": [
                 {
                     "index": i,
                     "title": p.title,
@@ -364,6 +384,7 @@ class Executor:
                     "source_url": p.source_url,
                     "score": p.score,
                     "source": p.source,
+                    "is_candidate": i < len(candidates),
                     # The Pi agent fetches full text ITSELF (fetch_full_text
                     # tool → agent/fetch_text.py). We deliberately do NOT
                     # preload full_text here: the agent decides what to read.
@@ -371,7 +392,7 @@ class Executor:
                     # already fetched by the Python side is available to it.
                     "full_text": "",
                 }
-                for i, p in enumerate(candidates)
+                for i, p in enumerate(full_pool)
             ],
         }
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -414,13 +435,16 @@ class Executor:
         except Exception as exc:
             logger.warning(f"Pi agent failed: {exc}")
             return None
-        digest = HarnessAgent._digest_from_args(data, len(candidates))
+        digest = HarnessAgent._digest_from_args(data, len(full_pool))
         if not digest.papers and not digest.intro:
             logger.warning("Pi agent returned an empty digest")
             return None
+        # Remember the pool the digest indexes refer to, so run() can render
+        # against the full pool (candidates + rest) instead of only ranked.
+        self._pi_pool = full_pool
         logger.info(
             f"Pi agent digest: {len(digest.papers)} recommended, "
-            f"{len(digest.others)} others scored"
+            f"{len(digest.others)} others scored (pool={len(full_pool)})"
         )
         return digest
 
@@ -648,13 +672,22 @@ class Executor:
 
         logger.info("Harness agent producing digest...")
         t_agent = time.time()
-        digest = self._agent_digest(ranked, corpus)
+        # Reset the Pi-pool marker from any previous run on this instance.
+        self._pi_pool = None
+        digest = self._agent_digest(ranked, corpus, pool=all_papers)
         logger.info(f"[stage:agent] digest produced in {time.time() - t_agent:.1f}s")
+
+        # Digest indexes refer to the FULL pool when the Pi agent succeeded
+        # (candidates first, rest after); otherwise they refer to ``ranked``
+        # (Python harness / fallback). Render against whichever space the
+        # digest actually uses, so rescued non-candidate papers show properly.
+        originals = self._pi_pool if self._pi_pool is not None else ranked
+        candidate_count = len(ranked)
 
         # Decide which papers were actually recommended (for sent-history).
         if digest and digest.papers:
-            selected_indices = [p.index for p in digest.papers if 0 <= (p.index or -1) < len(ranked)]
-            selected_papers = [ranked[i] for i in selected_indices] or ranked
+            selected_indices = [p.index for p in digest.papers if 0 <= (p.index or -1) < len(originals)]
+            selected_papers = [originals[i] for i in selected_indices] or ranked
         else:
             selected_papers = ranked
 
@@ -667,7 +700,10 @@ class Executor:
 
         logger.info("Rendering email...")
         language = (self.config.llm or {}).get("language", "English")
-        html_content = render_email(digest, originals=ranked, language=language)
+        html_content = render_email(
+            digest, originals=originals, language=language,
+            candidate_count=candidate_count,
+        )
 
         # Archive the rendered email for debugging / review (also uploaded as
         # a workflow artifact so we can inspect what the agent produced).
@@ -689,12 +725,33 @@ class Executor:
             self._deliver(html_content, subject=subject)
 
         if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
-            # Record every candidate that made it into the email (picked ones
-            # AND the "other candidates" list) so that nothing already shown
-            # to the reader is re-shown on a later day. New papers keep
+            # Record every paper that actually made it into the email (picked
+            # cards AND the "other candidates" list, including any the agent
+            # rescued from beyond the candidate list) so that nothing already
+            # shown to the reader is re-shown on a later day. New papers keep
             # flowing in from the feeds; yesterday's are never repeated.
             sent = self._load_sent_history()
-            sent.update(p.url for p in ranked)
+            shown: set[str] = set()
+            if digest and digest.papers:
+                picked = {dp.index for dp in digest.papers if 0 <= (dp.index or -1) < len(originals)}
+                for dp in digest.papers:
+                    if 0 <= (dp.index or -1) < len(originals):
+                        shown.add(originals[dp.index].url)
+                # Unpicked candidates that appear in the "others" block.
+                for o in digest.others or []:
+                    idx = int(o.get("index", -1))
+                    if 0 <= idx < len(originals):
+                        shown.add(originals[idx].url)
+                # Fallback: if the digest carried no others list, the whole
+                # candidate set was shown (embedding-order fallback renders
+                # every candidate).
+                if not digest.others:
+                    for i in range(min(candidate_count, len(originals))):
+                        if i not in picked:
+                            shown.add(originals[i].url)
+            else:
+                shown.update(p.url for p in ranked)
+            sent.update(shown)
             self._save_sent_history(sent)
 
         logger.info(

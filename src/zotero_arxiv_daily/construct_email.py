@@ -346,14 +346,24 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
     )
 
 
-def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English") -> str:
+def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None) -> str:
     """Render a Digest (or a plain fallback list) to HTML email.
 
     ``digest`` is the agent's structured output; when it is None we render the
     ``originals`` list as simple embedding-ordered cards (the graceful fallback).
+
+    ``originals`` carries the FULL paper pool the digest's indices refer to
+    (candidates first, filtered-out papers after). ``candidate_count`` tells
+    the renderer which indices are pre-filtered candidates (0..N-1): the
+    "other candidates" block lists every unpicked candidate plus any
+    filtered-out pool paper the agent explicitly scored in ``others`` — the
+    rest of the pool stays hidden. When ``candidate_count`` is None (legacy
+    callers), everything in ``originals`` is treated as a candidate.
     """
     if digest is None:
         return render_fallback(originals or [])
+    if candidate_count is None:
+        candidate_count = len(originals or [])
 
     title = _safe(_strip_markdown(_mathify(digest.subject))) or "Daily paper digest"
     today = _today_str()
@@ -402,12 +412,26 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
 
     # Remaining candidates (not picked by the agent) go at the bottom as a
     # compact list — still visible, with the same Relevance + Work badges as
-    # the picked cards plus the agent's overall comment on them.
+    # the picked cards plus the agent's overall comment on them. Pool papers
+    # beyond the candidate list only appear here if the agent scored them
+    # (rescued from the filter) — the rest of the pool stays hidden.
     others_html = ""
     if originals:
-        # Keep the ORIGINAL candidate index for each remaining paper so the
+        # Keep the ORIGINAL pool index for each remaining paper so the
         # badge map (keyed by original index) stays aligned.
-        others_indices = [i for i in range(len(originals)) if i not in selected_indices]
+        others_indices = [
+            i for i in range(min(candidate_count, len(originals)))
+            if i not in selected_indices
+        ]
+        # Filtered-out pool papers the agent explicitly scored in "others".
+        for entry in digest.others or []:
+            idx = int(entry.get("index", -1))
+            if (
+                0 <= idx < len(originals)
+                and idx >= candidate_count
+                and idx not in others_indices
+            ):
+                others_indices.append(idx)
         others = [originals[i] for i in others_indices]
         if others:
             others_map: dict[int, dict] = {}

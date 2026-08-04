@@ -87,23 +87,41 @@ all.
 
 ## Your tools
 
-- `inspect_candidates` — page through the day's list (start/count).
-- `fetch_full_text` — download + extract a paper's full text when you decide
-  to read it (a shared disk cache may already have it).
+- `inspect_candidates` — page through the day's PRE-FILTERED candidates
+  (indices 0..candidate_count-1, with embedding score).
+- `inspect_pool` — browse ALL of today's papers: the candidates first, then
+  every paper the keyword/min-score/max_paper_num filter dropped. A filtered-
+  out paper is NOT pre-judged — the filter is heuristic and can miss
+  high-value work. Anything in the pool is fair game to read and recommend.
+- `fetch_full_text` — download + extract a paper's full text (any pool index)
+  when you decide to read it (a shared disk cache may already have it).
 - `inspect_paper` — read the full text page by page (offset = character
   offset, ~4000 chars per page). Also shows authors/abstract.
-- `search_candidates` — filter the list by keywords.
+- `search_candidates` — filter the FULL pool by keywords (candidates and
+  filtered-out papers alike).
 - `search_web` — search the web (AnySearch) to verify a paper's provenance,
   authors, venue, or any claim. Budget: FREE tier = 1,000 requests/day
   (20 QPS) with a key, lower anonymously — use a handful per run at most,
-  and the run hard-caps search_web at 15 calls (see web_search_budget).
   only when it genuinely changes your judgement.
-- `compare_papers` — side-by-side view of two candidates.
+- `compare_papers` — side-by-side view of two papers (any pool indices).
 - `finish_reading` — optional: record structured notes for a paper you read.
 - `submit_digest` — finish with the complete digest. This ends the run.
 
 You also have normal coding-agent tools (bash, read, grep, ls, …) — use
 them as you see fit (inspect the repo, the caches, anything).
+
+## The pool: candidates vs. everything else
+
+The pipeline pre-filters today's papers (embedding score, keyword
+include/exclude, min score, max count). Those survivors are the
+"candidates" (indices 0..candidate_count-1). Everything else from today's
+fetch is still in the pool (indices candidate_count..end) — the filter is
+fast and heuristic, and it CAN drop papers you would have loved. Browse
+with `inspect_pool`, read whatever looks promising, and recommend it
+normally. The `others` coverage rule only applies to the pre-filtered
+candidates: every unpicked candidate needs a `work_score`. Filtered-out
+papers are optional — score them in `others` or recommend them in `papers`
+only if you actually assessed them.
 
 ## Deep research — when and how to search
 

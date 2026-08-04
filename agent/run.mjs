@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 // agent/run.mjs — Pi-agent entry point for the daily digest.
 //
-// Reads a JSON input file (candidates + research profile), runs the Pi coding
+// Reads a JSON input file (pool + research profile), runs the Pi coding
 // agent with ROLE.md as the system prompt and custom research tools
-// (inspect_candidates / inspect_paper / search_candidates / compare_papers /
-// submit_digest), and writes the digest JSON that the Python pipeline reads
-// back. Exit code 0 with a digest file = success; anything else lets the
-// Python side fall back to the embedding-order digest.
+// (inspect_candidates / inspect_pool / inspect_paper / search_candidates /
+// compare_papers / submit_digest), and writes the digest JSON that the
+// Python pipeline reads back. Exit code 0 with a digest file = success;
+// anything else lets the Python side fall back to the embedding-order digest.
+//
+// The pool is the FULL set of deduplicated papers from today's fetch:
+// candidates first (index 0..candidate_count-1, with embedding score), then
+// every remaining paper (index candidate_count..n-1). The agent can browse
+// the whole pool, fetch full text of ANY paper, and recommend papers beyond
+// the pre-filtered candidate list — a high-value paper that keyword/min-score
+// filters dropped can still make it into the digest.
 //
 // Usage:
 //   OPENAI_API_KEY=... node run.mjs --input in.json --output digest.json
@@ -75,7 +82,8 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { candidates, profile, language, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
+  const { pool, candidateCount, profile, language, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
+  const candidates = pool; // unified index space: candidates first, rest after
   const inspected = new Set();
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Used for the soft finish_reading nudge.
@@ -118,11 +126,11 @@ function buildTools(ctx) {
       name: "inspect_candidates",
       label: "Inspect candidates",
       description:
-        "List the day's candidate papers with their embedding relevance score and a short abstract. Call this to see what is available before deciding what to recommend. Page through with start/count.",
+        "List the day's pre-filtered candidate papers (indices 0..candidate_count-1) with their embedding relevance score and a short abstract. These are the papers the pipeline's keyword/min-score filter kept. Call this to see what the filter surfaced before deciding what to recommend. Page through with start/count. Use inspect_pool to see ALL of today's papers, including ones the filter dropped.",
       parameters: Type.Object({
         start: Type.Integer({
           default: 0,
-          description: "0-based start index",
+          description: "0-based start index within the candidate list",
         }),
         count: Type.Integer({
           default: 20,
@@ -143,14 +151,58 @@ function buildTools(ctx) {
           const abShort = ab.length > 400 ? ab.slice(0, 400) + "…" : ab;
           return `${idx}. [score ${p.score ?? "?"}] ${p.title}\n   ${authors}\n   ${abShort}`;
         });
+        const total = candidateCount;
+        const end = Math.min(start + count, total);
+        const more =
+          end < total
+            ? `\n\nMore candidates: call inspect_candidates with start=${end}`
+            : `\n\n(end of candidate list — ${total} candidates; use inspect_pool to see the full pool of ${pool.length})`;
+        return textResult(
+          `Candidates ${start}-${end - 1} of ${total}:\n\n` +
+            lines.join("\n\n") +
+            more
+        );
+      },
+    },
+    {
+      name: "inspect_pool",
+      label: "Inspect the full pool",
+      description:
+        "List ALL of today's papers (candidates first with their embedding score, then every remaining paper the pipeline's filters dropped — keyword/min-score/max_paper_num). The dropped ones are NOT pre-judged as irrelevant: the filter is heuristic and can miss high-value work, so anything here is fair game to fetch, read and recommend. Each entry shows title, authors and a short abstract. Page through with start/count; indices are stable across calls (they are the pool indices you use in fetch_full_text / inspect_paper / submit_digest).",
+      parameters: Type.Object({
+        start: Type.Integer({
+          default: 0,
+          description: "0-based start index into the full pool",
+        }),
+        count: Type.Integer({
+          default: 20,
+          minimum: 1,
+          maximum: 50,
+          description: "how many to show (max 50)",
+        }),
+      }),
+      execute: async (_toolCallId, params) => {
+        toolLog("TOOL", params);
+        const start = params.start ?? 0;
+        const count = Math.min(params.count ?? 20, 50);
+        const slice = candidates.slice(start, start + count);
+        const lines = slice.map((p, i) => {
+          const idx = start + i;
+          const tag = idx < candidateCount ? "[candidate]" : "[pool]";
+          const authors = (p.authors || []).slice(0, 6).join(", ");
+          const ab = p.abstract || "";
+          const abShort = ab.length > 300 ? ab.slice(0, 300) + "…" : ab;
+          const sc = p.score != null ? `score ${p.score.toFixed(2)}` : "unscored";
+          return `${idx}. ${tag} ${sc} — ${p.title}\n   ${authors}\n   ${abShort}`;
+        });
         const total = candidates.length;
         const end = Math.min(start + count, total);
         const more =
           end < total
-            ? `\n\nMore: call inspect_candidates with start=${end}`
-            : "\n\n(end of list)";
+            ? `\n\nMore: call inspect_pool with start=${end}`
+            : "\n\n(end of pool)";
         return textResult(
-          `Candidates ${start}-${end - 1} of ${total}:\n\n` +
+          `Full pool ${start}-${end - 1} of ${total} (first ${candidateCount} are candidates):\n\n` +
             lines.join("\n\n") +
             more
         );
@@ -160,14 +212,14 @@ function buildTools(ctx) {
       name: "fetch_full_text",
       label: "Fetch full text",
       description:
-        "Download and extract the full text of a candidate paper (by index) using the command line. The pipeline does NOT preload full texts — you decide what to read and fetch it yourself. Returns the extracted text (or a cache hit) and lets you then read it page by page with inspect_paper. Papers with no accessible full text return an error; you may still judge them from the abstract with lower confidence.",
+        "Download and extract the full text of a paper (by pool index) using the command line. The pipeline does NOT preload full texts — you decide what to read and fetch it yourself. Works for ANY paper in the pool, candidate or not. Returns the extracted text (or a cache hit) and lets you then read it page by page with inspect_paper. Papers with no accessible full text return an error; you may still judge them from the abstract with lower confidence.",
       parameters: Type.Object({
-        index: Type.Integer({ description: "candidate index" }),
+        index: Type.Integer({ description: "pool index" }),
       }),
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
         const p = candidates[params.index];
-        if (!p) return textResult(`No candidate at index ${params.index}`);
+        if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (p.full_text) {
           return textResult(
             `Already fetched (${p.full_text.length} chars). Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
@@ -251,9 +303,9 @@ function buildTools(ctx) {
       name: "inspect_paper",
       label: "Inspect paper",
       description:
-        "Read one candidate paper by its index: authors, affiliations when available, abstract, and a WINDOW of the full text. The full text is long — this returns one page (8000 chars from offset) with a progress note. Keep calling with a larger offset to read the next page until you understand the methods, experiments and results. Reading only the first page is not enough to judge a paper's quality. For VERY long papers you can delegate reading to a sub-agent via summarize_paper instead of paging through everything.",
+        "Read one paper by its pool index: authors, affiliations when available, abstract, and a WINDOW of the full text. The full text is long — this returns one page (8000 chars from offset) with a progress note. Keep calling with a larger offset to read the next page until you understand the methods, experiments and results. Reading only the first page is not enough to judge a paper's quality. For VERY long papers you can delegate reading to a sub-agent via summarize_paper instead of paging through everything.",
       parameters: Type.Object({
-        index: Type.Integer({ description: "candidate index" }),
+        index: Type.Integer({ description: "pool index" }),
         offset: Type.Integer({
           default: 0,
           description: "character offset into the full text (0 = start, 4000 = next page, ...)",
@@ -262,7 +314,7 @@ function buildTools(ctx) {
       execute: async (_toolCallId, params) => {
         toolLog("TOOL", params);
         const p = candidates[params.index];
-        if (!p) return textResult(`No candidate at index ${params.index}`);
+        if (!p) return textResult(`No paper at pool index ${params.index}`);
         if (!p.full_text) {
           return textResult(
             `#${params.index} (${p.title}) has no full text loaded yet. ` +
@@ -368,9 +420,9 @@ function buildTools(ctx) {
     },
     {
       name: "search_candidates",
-      label: "Search candidates",
+      label: "Search pool",
       description:
-        "Filter the candidate list by keywords (title + abstract substring match, case-insensitive). Returns only the matching papers. Use this to focus on a topic.",
+        "Filter the FULL pool by keywords (title + abstract substring match, case-insensitive). Returns the matching papers with their pool indices — candidates and filtered-out papers alike. Use this to hunt for a topic across everything fetched today, not just the pre-filtered list.",
       parameters: Type.Object({
         query: Type.String({ description: "keyword(s) to match" }),
       }),
@@ -384,12 +436,13 @@ function buildTools(ctx) {
           const hay = `${p.title} ${p.abstract || ""}`.toLowerCase();
           if (hay.includes(q)) hits.push(i);
         }
-        if (!hits.length) return textResult(`No candidates match "${params.query}".`);
+        if (!hits.length) return textResult(`No papers match "${params.query}".`);
         const lines = hits.map((i) => {
           const p = candidates[i];
-          return `${i}. [score ${p.score ?? "?"}] ${p.title}`;
+          const tag = i < candidateCount ? "candidate" : "pool";
+          return `${i}. [${tag}, score ${p.score ?? "?"}] ${p.title}`;
         });
-        return textResult(`Matches for "${params.query}":\n` + lines.join("\n"));
+        return textResult(`Matches for "${params.query}" (pool):\n` + lines.join("\n"));
       },
     },
     {
@@ -564,7 +617,7 @@ function buildTools(ctx) {
         // Data-contract checks only (the email renderer needs these fields);
         // how the agent got there is its own business.
         const picked = new Set((params.papers || []).map((p) => p.index));
-        // Every referenced index must be a real candidate (the renderer maps
+        // Every referenced index must be a real pool entry (the renderer maps
         // index -> paper; an out-of-range index would render as "Paper 999").
         const badPicked = (params.papers || []).filter(
           (p) => p.index < 0 || p.index >= candidates.length
@@ -582,12 +635,17 @@ function buildTools(ctx) {
             `Invalid index in others: ${badOthers.map((o) => o.index).join(", ")} — indexes must be 0..${candidates.length - 1}. Fix and resubmit.`
           );
         }
-        const unpicked = [];
-        for (let i = 0; i < candidates.length; i++) {
-          if (!picked.has(i)) unpicked.push(i);
+        // Coverage contract: EVERY unpicked CANDIDATE (index < candidateCount)
+        // needs a work_score in "others" — the reader expects the same ruler
+        // for every pre-filtered candidate. Papers beyond the candidate list
+        // (filtered-out pool papers) are optional: score them in "others" or
+        // recommend them in "papers" only if you actually assessed them.
+        const unpickedCandidates = [];
+        for (let i = 0; i < candidateCount; i++) {
+          if (!picked.has(i)) unpickedCandidates.push(i);
         }
         const scored = new Set((params.others || []).map((o) => o.index));
-        const missing = unpicked.filter((i) => !scored.has(i));
+        const missing = unpickedCandidates.filter((i) => !scored.has(i));
         if (missing.length) {
           return textResult(
             `Every unpicked candidate needs a work_score in "others". Missing: ${missing.join(", ")}. ` +
@@ -631,7 +689,11 @@ async function main() {
   const args = parseArgs(process.argv);
   const input = JSON.parse(readFileSync(args.input, "utf8"));
 
-  const candidates = input.candidates || [];
+  // Full pool: candidates first (0..candidate_count-1, embedding-scored),
+  // then every remaining deduplicated paper from today's fetch. Unified
+  // index space for all tools and the digest.
+  const pool = input.pool || input.candidates || [];
+  const candidateCount = Math.min(input.candidate_count ?? pool.length, pool.length);
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
@@ -639,8 +701,8 @@ async function main() {
   const fullTextCacheMax = input.full_text_cache_max ?? 200;
   const digestPath = args.output;
 
-  if (!candidates.length) {
-    console.error("run.mjs: empty candidates");
+  if (!pool.length) {
+    console.error("run.mjs: empty pool");
     process.exit(1);
   }
   if (!process.env.OPENAI_API_KEY) {
@@ -725,7 +787,8 @@ async function main() {
     .join("\n");
 
   const tools = buildTools({
-    candidates,
+    pool,
+    candidateCount,
     profile,
     language,
     digestPath,
@@ -762,7 +825,7 @@ async function main() {
       ? `Zotero library (all ${(input.corpus || []).length} papers, newest first — the researcher's actual library; use it to calibrate what they care about). Abstracts are truncated to keep context lean: call inspect_library_paper(<index>) for any paper's FULL abstract and paths:\n${corpusText}`
       : "",
     `Language: write the digest in ${language}.`,
-    `Candidates: ${candidates.length} paper(s) available. The full texts are NOT preloaded — you fetch what you want to read, with fetch_full_text or bash.`,
+    `Papers: ${pool.length} deduplicated papers from today's fetch — ${candidateCount} pre-filtered candidates (indices 0..${candidateCount - 1}, embedding-scored) plus ${pool.length - candidateCount} more the keyword/min-score filter dropped (indices ${candidateCount}..${pool.length - 1}). The full texts are NOT preloaded — you fetch what you want to read, with fetch_full_text or bash. Browse candidates with inspect_candidates; browse the WHOLE pool with inspect_pool. A filtered-out paper can still be excellent — if you find one worth reading, read it and recommend it.`,
     "",
     "## Constraints",
     `Never refer to papers by candidate index numbers in the intro/reasons/outro — use titles.`,

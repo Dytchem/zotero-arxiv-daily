@@ -487,9 +487,9 @@ function buildTools(ctx) {
     },
     {
       name: "summarize_paper",
-      label: "Summarize a long paper (sub-agent)",
+      label: "Summarize a paper (sub-agent)",
       description:
-        "For a LONG paper, delegate reading to a sub-agent: it chunks the full text, summarizes each chunk (methods / experiments / results / limitations), and returns consolidated notes — without flooding your context with the whole text. Use this when a paper is very long and you need the gist before deciding; then inspect_paper specific offsets for details you want verbatim.",
+        "For a LONG paper, delegate reading to a sub-agent: it reads the ENTIRE full text in one pass (not chunked — the model window is ample) and returns consolidated notes covering methods / experiments / results / limitations and how they connect. Use this when a paper is long and you need the gist before deciding; then inspect_paper specific offsets for details you want verbatim.",
       parameters: Type.Object({
         index: Type.Integer({ description: "candidate index" }),
         focus: Type.Optional(
@@ -508,45 +508,39 @@ function buildTools(ctx) {
         }
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) return textResult("OPENAI_API_KEY not set; cannot run sub-agent. Use inspect_paper instead.");
-        const CHUNK = 16000;
-        const chunks = [];
-        for (let i = 0; i < full.length; i += CHUNK) chunks.push(full.slice(i, i + CHUNK));
         const baseUrl = (process.env.OPENAI_API_BASE || "https://openrouter.ai/api/v1").replace(/\/$/, "");
-        const notes = [];
-        for (let ci = 0; ci < chunks.length; ci++) {
-          const sys =
-            "You are a meticulous research librarian. Given a chunk of a paper's full text, extract: METHODS (specific techniques), EXPERIMENTS/RESULTS (specific numbers/systems/findings), LIMITATIONS, and a ONE-LINE takeaway. Be concrete and grounded in the text; do not invent. Reply in the digest language.\n" +
-            "Format: bullet points under each heading (METHODS / EXPERIMENTS / RESULTS / LIMITATIONS / TAKEAWAY). Keep it tight — aim for 3-6 bullets per section, one sentence each, and NEVER omit specific numbers, method names, or findings. Substance beats brevity, but no filler.";
-          const usr = `Paper: ${p.title}\n${params.focus ? `Focus: ${params.focus}\n` : ""}Chunk ${ci + 1}/${chunks.length}\n${chunks[ci]}`;
-          const resp = await fetch(`${baseUrl}/chat/completions`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: typeof model === "string" ? model : model?.id,
-              messages: [
-                { role: "system", content: sys },
-                { role: "user", content: usr },
-              ],
-              // Notes are dense bullet points; 2048 tokens is plenty and
-              // keeps the sub-agent output (and its cost) bounded while the
-              // main agent still gets all the numbers it needs.
-              max_tokens: 2048,
-            }),
-            signal: AbortSignal.timeout(60000),
-          });
-          if (!resp.ok) {
-            return textResult(
-              `Sub-agent summary failed at chunk ${ci + 1}: HTTP ${resp.status} ${(await resp.text()).slice(0, 150)}. Use inspect_paper instead.`
-            );
-          }
-          const data = await resp.json();
-          const text = data.choices?.[0]?.message?.content || "(empty)";
-          notes.push(`--- chunk ${ci + 1}/${chunks.length} ---\n${text}`);
+        const sys =
+          "You are a meticulous research librarian reading a paper IN FULL. The user message contains the complete full text of one paper (title + everything). Read it end-to-end before writing anything: understand how the methods, experiments, results and conclusions connect — the narrative across the whole paper, not isolated fragments. Then produce structured notes:\n" +
+          "METHODS — the specific techniques, models, algorithms, approximations (name them precisely);\n" +
+          "EXPERIMENTS / RESULTS — the concrete systems studied and quantitative findings (exact numbers, scales, benchmarks, comparisons);\n" +
+          "LIMITATIONS — what the authors concede or what you can infer is unverified;\n" +
+          "TAKEAWAY — one-line bottom line.\n" +
+          "Be concrete and grounded in the text; do not invent. Reply in the digest language. Keep it tight: 3-6 bullets per section, one sentence each, and NEVER omit specific numbers, method names, or findings. Substance beats brevity, but no filler.";
+        const usr = `Paper: ${p.title}\n${params.focus ? `Focus: ${params.focus}\n` : ""}Full text (${full.length} chars):\n\n${full}`;
+        const resp = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: typeof model === "string" ? model : model?.id,
+            messages: [
+              { role: "system", content: sys },
+              { role: "user", content: usr },
+            ],
+            // Notes are dense bullet points; 2048 tokens is plenty and
+            // keeps the sub-agent output (and its cost) bounded while the
+            // main agent still gets all the numbers it needs.
+            max_tokens: 2048,
+          }),
+          signal: AbortSignal.timeout(120000),
+        });
+        if (!resp.ok) {
+          return textResult(
+            `Sub-agent summary failed: HTTP ${resp.status} ${(await resp.text()).slice(0, 150)}. Use inspect_paper instead.`
+          );
         }
-        return textResult(
-          `Sub-agent reading of #${params.index} (${p.title}, ${full.length} chars → ${chunks.length} chunks):\n\n` +
-            notes.join("\n\n")
-        );
+        const data = await resp.json();
+        const text = data.choices?.[0]?.message?.content || "(empty)";
+        return textResult(`Sub-agent reading of #${params.index} (${p.title}, ${full.length} chars, full text read in one pass):\n\n${text}`);
       },
     },
     {

@@ -13,7 +13,7 @@ All notable changes to this project are documented here.
   - email 发件人显示名从 "Github Action" 改为 "Zotero-arXiv-Daily"；other-candidates 列表标题补上 `_strip_markdown`（与卡片标题一致）。
 - **文案："工作水平" → "推荐度"**（英文 Work → Recommendation）：邮件徽章、harness 提示词、README 同步改名，内部字段 `work_score` 不变。
 - **成本优化（LLM 费用 ~$0.42 → 目标 $0.13-0.18/次）**：
-  - summarize_paper 子代理 CHUNK 8000 → 16000 字符（请求数减半）+ max_tokens 4096 → 2048（输出减半）——13 次子代理调用占 agent 阶段 81% 时长，此改动时长/费用双减；
+  - summarize_paper 子代理改为**整篇一次读入**（弃用 16k 字符分块循环——分块割裂上下文，块间无关联；luna 窗口 105 万 token，全文 6 万 token 单次读入毫无压力），提示词改为要求端到端通读、理解方法/实验/结论的跨章节关联；max_tokens 2048、单次 120s 超时；
   - ROLE.md 新增 Reading budget 引导：先基于 abstract 给全池打分，深读只针对 top ~8 候选（软引导，无硬限制，agent 仍可任意深读）——避免 13 篇全量深读的过度消耗；
   - ROLE.md 明确阅读成本纪律：长文优先 summarize_paper、inspect_paper 每篇最多 2-3 页、上下文 ~272k tokens 单价翻倍红线、others note 一句话内可省略；
   - 初始上下文核实：progressive disclosure 早已实现（pool 索引不注入，agent 用 inspect_pool/inspect_candidates 按需拉取），大头是工具结果累积，已通过上述两项控制。

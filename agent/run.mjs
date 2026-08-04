@@ -649,12 +649,53 @@ async function main() {
   }
 
   // Custom provider lives in models.json (apiKey=$OPENAI_API_KEY, baseUrl=OpenRouter).
-  const runtime = await ModelRuntime.create({
-    modelsPath: path.join(AGENT_DIR, "models.json"),
+  // 编程式创建 provider（从环境变量读 baseUrl 和 apiKey），不使用内置 provider
+  const { createProvider } = await import("@earendil-works/pi-ai");
+  const { envApiKeyAuth } = await import("@earendil-works/pi-ai/auth/helpers");
+  const { openAICompletionsApi } = await import("@earendil-works/pi-ai/api/openai-completions.lazy");
+
+  // 创建 ModelRuntime（会加载内置 provider catalog）
+  const runtime = await ModelRuntime.create({ modelsPath: null });
+
+  // 清空所有内置 provider（防止 mimo 等被调用）
+  runtime.builtins.clear();
+  runtime.models.clearProviders();
+
+  // 从环境变量读 baseUrl（用户的 OPENAI_API_BASE，不是硬编码 openrouter）
+  const baseUrl = process.env.OPENAI_API_BASE || "https://api.openai.com/v1";
+
+  // 创建自定义 provider
+  const customProvider = createProvider({
+    id: "custom",
+    baseUrl,
+    auth: envApiKeyAuth("openai", ["OPENAI_API_KEY"]),
+    models: [
+      {
+        id: modelId,
+        name: modelId,
+        api: "openai-completions",
+        provider: "custom",
+        baseUrl,
+        reasoning: true,
+        thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000000,
+        maxTokens: 128000,
+        compat: { thinkingFormat: "openrouter" },
+      },
+    ],
+    api: openAICompletionsApi(),
   });
-  const model = runtime.getModel("openrouter", modelId);
+
+  // 注册自定义 provider
+  runtime.models.setProvider(customProvider);
+  runtime.builtins.set("custom", customProvider);
+  runtime.rebuildProviders();
+
+  const model = runtime.getModel("custom", modelId);
   if (!model) {
-    console.error(`run.mjs: model ${modelId} not found in custom provider`);
+    console.error(`Model ${modelId} not found in custom provider`);
     process.exit(1);
   }
 

@@ -74,6 +74,14 @@ A full test send (`reset_history=true`) on 2026-08-04, on the free GitHub Action
 - **Cost**: **$0.1245** for the whole run — main agent loop $0.064 (reasoning/writing) + full-text sub-agent reads $0.060 + embeddings $0.001; web search $0 (AnySearch). Prompt cache hit ~76%, peak context 125k tokens (no price-doubling tier).
 - **Runtime**: ~10 min end-to-end on the shared runner.
 
+## Email digest preview
+
+Below is a screenshot of a typical digest email as received on mobile (Zotero-arXiv-Daily WeChat article format):
+
+![Email screenshot 1](assets/email-screenshot-1.jpg)
+![Email screenshot 2](assets/email-screenshot-2.jpg)
+![Email screenshot 3](assets/email-screenshot-3.jpg)
+
 ## Architecture
 
 ```

@@ -74,6 +74,14 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
 - **费用**：整次运行 **$0.1245** —— 主 agent 循环 $0.064（推理/写作）+ 全文精读子 agent $0.060 + 嵌入 $0.001；联网搜索 $0（走 AnySearch）。prompt 缓存命中 ~76%，峰值上下文 125k tokens（未触发价格翻倍档）。
 - **耗时**：共享 runner 上约 10 分钟全流程。
 
+## 邮件示例
+
+以下为典型摘要邮件在手机端的展示效果（微信公众号文章格式）：
+
+![邮件截图 1](assets/email-screenshot-1.jpg)
+![邮件截图 2](assets/email-screenshot-2.jpg)
+![邮件截图 3](assets/email-screenshot-3.jpg)
+
 ## 架构
 
 ```

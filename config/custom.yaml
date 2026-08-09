@@ -31,7 +31,7 @@ llm:
 
 source:
   arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+    category: ["quant-ph", "physics.atom-ph", "physics.optics", "cond-mat.quant-gas", "cond-mat.mes-hall", "cond-mat.str-el", "cond-mat.mtrl-sci"]
     include_cross_list: false
     lookback_days: 2
     fallback_days: 7

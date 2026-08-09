@@ -404,6 +404,7 @@ class Executor:
             if out_path.exists():
                 out_path.unlink()
             env = dict(os.environ)
+            env["LLM_API_KEY"] = api_key
             env["OPENAI_API_KEY"] = api_key
             if api_base:
                 env["OPENAI_API_BASE"] = api_base

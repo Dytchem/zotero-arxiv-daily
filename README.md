@@ -40,7 +40,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 - **Full-text reading, guaranteed** — reading progress is tracked; a paper must actually be read (not skimmed) before it can be recommended. Long papers are delegated to a sub-agent that reads the **entire full text in one pass** (no fragmentary chunking), so nothing is skipped and cross-section connections survive. Already-read papers float to the top of the agent's candidate/pool lists tagged `[READ]` (pool indices stay stable).
 - **Cost-conscious by design** — the agent scores the whole pool from abstracts first and deep-reads only the shortlist (~8 papers), so a daily run costs well under $0.20; long-paper sub-agent reads the full text in one pass. No hard limits — the agent can always read more if it needs to.
 - **Safe rendering** — every text field HTML-escaped, LaTeX→Unicode, links whitelisted. The agent writes JSON, never markup.
-- **Provider-safe by design** — the LLM provider is created programmatically from `OPENAI_API_BASE` + `OPENAI_API_KEY` with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.
+- **Provider-safe by design** — the LLM provider is created programmatically from the base URL hardcoded in config (`llm.api.base_url`, default `https://opencode.ai/zen/go/v1`) + the `LLM_API_KEY` secret with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.
 - **Graceful degradation** — Pi failure → Python harness → embedding-order digest. The email always goes out.
 - **Gap-free lookback, sent-history dedupe, multi-source, multi-recipient, webhook notifier, bilingual (EN/ZH).**
 
@@ -49,7 +49,8 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 1. **Fork** this repo.
 2. **Configure** — set repository **Secrets** (Actions → Settings → Secrets):
    - `ZOTERO_ID`, `ZOTERO_KEY` — your Zotero user ID and API key
-   - `OPENAI_API_KEY`, `OPENAI_API_BASE` — an LLM API key + base URL (OpenRouter recommended)
+   - `LLM_API_KEY` — your LLM API key (base URL is hardcoded in config: `https://opencode.ai/zen/go/v1`)
+   - `RERANKER_API_KEY` — your reranker/embedding API key (base URL is hardcoded in config: `https://openrouter.ai/api/v1`)
    - `SENDER`, `RECEIVER`, `SENDER_PASSWORD` — SMTP credentials
    - *Optional but recommended:* `ANYSEARCH_API_KEY` — a free [AnySearch](https://anysearch.com/console/api-keys) API key for `search_web`. The agent uses web search to verify paper provenance (authors, venue, novelty claims). **Without a key it still works via anonymous access, but the shared GitHub runner IP is easily rate-limited and searches may fail**, which slows the agent down. With a key you get 1,000 requests/day (20 QPS).
    - Set the **Variable** `CUSTOM_CONFIG` — a YAML override with your arXiv categories and reranker (see `config/custom.yaml` in the repo)
@@ -105,7 +106,7 @@ Feeds ──► retrieve ──► rerank (embeddings+BM25) ──► filter ─
 src/zotero_arxiv_daily/   Python pipeline: executor, construct_email, retrievers,
                           rerankers, notifier, legacy Python harness
 agent/                    Pi agent engine: run.mjs, ROLE.md, fetch_text.py
-                          (provider built from env vars OPENAI_API_BASE + OPENAI_API_KEY;
+                          (provider built from config llm.api.base_url + LLM_API_KEY;
                            no models.json, no built-in provider catalog)
 config/                   base.yaml (schema) + custom.yaml (overrides)
 tests/                    195 tests, ruff-clean

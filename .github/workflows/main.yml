@@ -57,8 +57,8 @@ jobs:
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          RERANKER_API_KEY: ${{ secrets.RERANKER_API_KEY }}
           ANYSEARCH_API_KEY: ${{ secrets.ANYSEARCH_API_KEY }} # optional: raises search_web rate limits (free tier 1k req/day; anonymous works too)
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |

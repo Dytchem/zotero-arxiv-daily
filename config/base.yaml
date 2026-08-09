@@ -26,7 +26,7 @@ email:
 llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx
-    base_url: ??? # API URL of your LLM API. Example: https://openrouter.ai/api/v1
+    base_url: https://opencode.ai/zen/go/v1 # API URL of your LLM API (hardcoded, not a secret)
   generation_kwargs:
   # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
     max_tokens: 16384
@@ -54,7 +54,7 @@ reranker:
       prompt_name: document
   api:
     key: null # API Key of your embedding model API. Example: sk-xxx
-    base_url: null # API URL of your embedding model API. Example: https://api.openai.com/v1
+    base_url: https://openrouter.ai/api/v1 # API URL of your embedding model API (hardcoded, not a secret)
     model: null # The model name of the embedding model. Example: text-embedding-3-large
     batch_size: null # The batch size for embedding API requests. Adjust to match your provider's limit. Example: 64
     cache_dir: null # Directory for the corpus-embedding cache (default: .cache). Example: .cache

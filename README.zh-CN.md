@@ -40,7 +40,7 @@
 - **保证读全文** —— 阅读进度被追踪；一篇论文必须真正读过（而非扫标题）才能被推荐。长文交给子 agent，子 agent **一次性读完全文**（不再分块截断，跨章节关联不丢失）；已读论文在 agent 的候选/全池列表中置顶并标 `[READ]`（pool 索引保持稳定）。
 - **成本可控** —— agent 先从摘要给全池打分，只对短名单（约 8 篇）精读；长文子 agent 一次性读完全文。单次运行费用远低于 $0.20。无硬限制 —— agent 觉得需要时可以读更多。
 - **安全渲染** —— 所有文本字段 HTML 转义、LaTeX→Unicode、链接白名单。agent 只写 JSON，不碰标记语言。
-- **Provider 安全** —— LLM provider 从 `OPENAI_API_BASE` + `OPENAI_API_KEY` 编程式创建，只暴露你配置的那一个模型；Pi 内置的 provider 目录（可能静默回退到未配置的模型）从不加载。
+- **Provider 安全** —— LLM provider 从 config 中硬编码的 base URL（`llm.api.base_url`，默认 `https://opencode.ai/zen/go/v1`）+ `LLM_API_KEY` secret 编程式创建，只暴露你配置的那一个模型；Pi 内置的 provider 目录（可能静默回退到未配置的模型）从不加载。
 - **优雅降级** —— Pi 失败 → Python harness → 嵌入排序摘要。邮件永远发得出去。
 - **无缝隙回溯、已发去重、多来源、多收件人、webhook 通知、中英双语。**
 
@@ -49,7 +49,8 @@
 1. **Fork** 本仓库。
 2. **配置** —— 在仓库 **Secrets** 里设置（Actions → Settings → Secrets）：
    - `ZOTERO_ID`、`ZOTERO_KEY` —— 你的 Zotero 用户 ID 和 API key
-   - `OPENAI_API_KEY`、`OPENAI_API_BASE` —— LLM API key + 地址（推荐 OpenRouter）
+   - `LLM_API_KEY` —— LLM API key（base URL 已硬编码在 config 中：`https://opencode.ai/zen/go/v1`）
+   - `RERANKER_API_KEY` —— reranker/embedding API key（base URL 已硬编码在 config 中：`https://openrouter.ai/api/v1`）
    - `SENDER`、`RECEIVER`、`SENDER_PASSWORD` —— SMTP 邮箱凭据
    - *可选但建议：* `ANYSEARCH_API_KEY` —— 在 [AnySearch](https://anysearch.com/console/api-keys) 免费注册的 API key，供 `search_web` 工具使用。agent 用它核实论文出处（作者、机构、新颖性声明）。**不配置也能匿名使用，但 GitHub Actions 共享 runner IP 很容易被限流，搜索可能失败**，拖慢 agent；配置后享有 1000 次/天（20 QPS）。
    - 设置 **Variable** `CUSTOM_CONFIG` —— YAML 覆写配置，含你的 arXiv 分类和 reranker（参考仓库里的 `config/custom.yaml`）
@@ -104,7 +105,7 @@ Zotero 文献库 ──► build_profile (LLM, 缓存)
 src/zotero_arxiv_daily/   Python 流水线：executor、construct_email、retriever、
                           reranker、notifier、旧版 Python harness
 agent/                    Pi agent 引擎：run.mjs、ROLE.md、fetch_text.py
-                          （provider 从环境变量 OPENAI_API_BASE + OPENAI_API_KEY 创建；
+                          （provider 从 config 的 llm.api.base_url + LLM_API_KEY 创建；
                            无 models.json，不加载内置 provider 目录）
 config/                   base.yaml（配置模式）+ custom.yaml（覆写）
 tests/                    195 个测试，ruff 干净

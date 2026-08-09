@@ -16,13 +16,14 @@
 // filters dropped can still make it into the digest.
 //
 // Usage:
-//   OPENAI_API_KEY=... node run.mjs --input in.json --output digest.json
+//   LLM_API_KEY=... node run.mjs --input in.json --output digest.json
 //
 // The provider is created programmatically (no models.json, no built-in
-// provider catalog): baseUrl + apiKey come from OPENAI_API_BASE /
-// OPENAI_API_KEY, and the runtime exposes ONLY the configured model. This
-// deliberately excludes Pi's built-in providers (whose model catalogs include
-// models like xiaomi/mimo that would silently be called with the same key).
+// provider catalog): baseUrl comes from OPENAI_API_BASE (set by executor.py
+// from config/llm.api.base_url) and apiKey from LLM_API_KEY / OPENAI_API_KEY,
+// and the runtime exposes ONLY the configured model. This deliberately
+// excludes Pi's built-in providers (whose model catalogs include models like
+// xiaomi/mimo that would silently be called with the same key).
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -525,9 +526,9 @@ function buildTools(ctx) {
             `#${params.index} has no full text loaded yet. Call fetch_full_text(index=${params.index}) first.`
           );
         }
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) return textResult("OPENAI_API_KEY not set; cannot run sub-agent. Use inspect_paper instead.");
-        const baseUrl = (process.env.OPENAI_API_BASE || "https://openrouter.ai/api/v1").replace(/\/$/, "");
+        const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY;
+        if (!apiKey) return textResult("LLM_API_KEY not set; cannot run sub-agent. Use inspect_paper instead.");
+        const baseUrl = (process.env.OPENAI_API_BASE || "https://opencode.ai/zen/go/v1").replace(/\/$/, "");
         const sys =
           "You are a meticulous research librarian reading a paper IN FULL. The user message contains the complete full text of one paper (title + everything). Read it end-to-end before writing anything: understand how the methods, experiments, results and conclusions connect — the narrative across the whole paper, not isolated fragments. Then produce structured notes:\n" +
           "METHODS — the specific techniques, models, algorithms, approximations (name them precisely);\n" +
@@ -744,8 +745,8 @@ async function main() {
     console.error("run.mjs: empty pool");
     process.exit(1);
   }
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("run.mjs: OPENAI_API_KEY is not set");
+  if (!process.env.LLM_API_KEY && !process.env.OPENAI_API_KEY) {
+    console.error("run.mjs: LLM_API_KEY is not set");
     process.exit(1);
   }
 
@@ -761,7 +762,7 @@ async function main() {
   runtime.models.clearProviders();
 
   // 从环境变量读 baseUrl 和 apiKey
-  const baseUrl = process.env.OPENAI_API_BASE || "https://api.openai.com/v1";
+  const baseUrl = process.env.OPENAI_API_BASE || "https://opencode.ai/zen/go/v1";
 
   // 创建自定义 provider。注意 auth 必须嵌套为 { apiKey: ... }：
   // Pi 的 checkAuth 读 provider.auth.apiKey，平铺的 envApiKeyAuth 会让
@@ -770,7 +771,7 @@ async function main() {
   const customProvider = createProvider({
     id: "custom",
     baseUrl,
-    auth: { apiKey: envApiKeyAuth("API key", ["OPENAI_API_KEY"]) },
+    auth: { apiKey: envApiKeyAuth("API key", ["LLM_API_KEY", "OPENAI_API_KEY"]) },
     models: [
       {
         id: modelId,

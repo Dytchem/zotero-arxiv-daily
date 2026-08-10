@@ -80,9 +80,7 @@ A full test send (`reset_history=true`) on 2026-08-04, on the free GitHub Action
 
 Below is a screenshot of a typical digest email as received on mobile (Zotero-arXiv-Daily WeChat article format):
 
-![Email screenshot 1](assets/email-screenshot-1.jpg)
-![Email screenshot 2](assets/email-screenshot-2.jpg)
-![Email screenshot 3](assets/email-screenshot-3.jpg)
+![Email screenshot](assets/email-screenshot-2026-08-10.jpg)
 
 ## Architecture
 

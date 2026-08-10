@@ -80,9 +80,7 @@ DEBUG=true uv run src/zotero_arxiv_daily/main.py
 
 以下为典型摘要邮件在手机端的展示效果（微信公众号文章格式）：
 
-![邮件截图 1](assets/email-screenshot-1.jpg)
-![邮件截图 2](assets/email-screenshot-2.jpg)
-![邮件截图 3](assets/email-screenshot-3.jpg)
+![邮件截图](assets/email-screenshot-2026-08-10.jpg)
 
 ## 架构
 

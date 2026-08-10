@@ -901,3 +901,84 @@ def test_collect_shown_urls_includes_rescued_pool_papers(config):
     )
     shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
     assert originals[4].url in shown
+
+
+def test_run_survives_reranker_failure(config, monkeypatch, tmp_path):
+    """Regression: a reranker exception must NOT kill the run — the email
+    still goes out in fetch order with unscored papers (H1/H2 round-2 fix)."""
+    import smtplib
+
+    from omegaconf import open_dict
+
+    from tests.canned_responses import (
+        make_sample_paper,
+        make_stub_openai_client,
+        make_stub_smtp,
+        make_stub_zotero_client,
+    )
+
+    with open_dict(config):
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.send_empty = False
+        config.executor.min_score = 0.5  # must be skipped on the degraded path
+        config.executor.cache_dir = str(tmp_path)
+
+    stub_zot = make_stub_zotero_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    retrieved = [
+        make_sample_paper(title="Degraded 1", score=None, url="https://arxiv.org/abs/degraded-1"),
+        make_sample_paper(title="Degraded 2", score=None, url="https://arxiv.org/abs/degraded-2"),
+    ]
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
+
+    executor = Executor(config)
+    monkeypatch.setattr(executor, "_maybe_fetch_full_texts", lambda papers: None)
+    monkeypatch.setattr(executor.reranker, "rerank", lambda papers, corpus: (_ for _ in ()).throw(RuntimeError("provider down")))
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+
+    executor.run()  # must NOT raise
+    assert len(sent) == 1, "Email should still be sent on reranker failure"
+
+
+def test_digest_from_args_does_not_render_none_strings(config):
+    """Regression (M1 round-2): null text fields must not become the literal
+    string 'None' in the rendered email."""
+    from zotero_arxiv_daily.harness import HarnessAgent
+
+    digest = HarnessAgent._digest_from_args(
+        {"subject": None, "intro": None, "papers": [{"index": 0, "reason": None, "tldr": None}], "outro": None},
+        1,
+    )
+    assert digest.subject == ""
+    assert digest.intro == ""
+    assert digest.papers[0].reason == ""
+    assert digest.papers[0].tldr == ""
+    assert digest.outro == ""
+
+
+def test_collect_shown_urls_empty_papers_still_records_rescued(config):
+    """Regression (M2 round-2): a digest with an empty papers list (valid:
+    nothing worth recommending) still shows the others block — rescued pool
+    papers must be recorded too, or they are re-sent tomorrow."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest
+
+    executor = Executor(config)
+    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(4)]
+    digest = Digest(
+        subject="", intro="Nothing worth recommending.", outro="",
+        papers=[],  # empty papers list
+        others=[{"index": 3, "work_score": 5.0}],  # rescued pool paper (3 >= candidate_count=2)
+    )
+    shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
+    # all candidates (0,1) + rescued (3)
+    assert {originals[i].url for i in (0, 1, 3)} <= shown

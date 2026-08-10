@@ -67,6 +67,7 @@ class Executor:
             source: get_retriever_cls(source)(config) for source in config.executor.source
         }
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
+        self._rerank_failed = False
         self._validate_config()
 
     def _validate_config(self) -> None:
@@ -166,6 +167,8 @@ class Executor:
 
     @staticmethod
     def _normalize_title(title: str) -> str:
+        if not title:
+            return ""
         return re.sub(r"[^a-z0-9]+", "", title.lower())
 
     @staticmethod
@@ -189,6 +192,11 @@ class Executor:
     def _filter_min_score(self, papers: list[Paper]) -> list[Paper]:
         min_score = self.config.executor.get("min_score")
         if min_score is None:
+            return papers
+        if getattr(self, "_rerank_failed", False):
+            # Degraded run (no scores): dropping everything would silently
+            # kill the email — keep fetch order instead.
+            logger.warning("Skipping min_score filter (reranker failed, papers unscored)")
             return papers
         kept = [p for p in papers if p.score is not None and p.score >= min_score]
         dropped = len(papers) - len(kept)
@@ -427,11 +435,12 @@ class Executor:
             env = {
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": os.environ.get("HOME", ""),
-                "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", ""),
                 "LLM_API_KEY": api_key,
                 "OPENAI_API_KEY": api_key,
                 "OPENAI_API_BASE": api_base or "https://opencode.ai/zen/go/v1",
             }
+            if os.environ.get("UV_CACHE_DIR"):
+                env["UV_CACHE_DIR"] = os.environ["UV_CACHE_DIR"]
             if os.environ.get("ANYSEARCH_API_KEY"):
                 env["ANYSEARCH_API_KEY"] = os.environ["ANYSEARCH_API_KEY"]
             timeout = int(harness_cfg.get("pi_timeout", 7200))
@@ -659,24 +668,33 @@ class Executor:
         no digest.
         """
         shown: set[str] = set()
-        if digest and digest.papers:
-            picked = {
-                dp.index for dp in digest.papers
-                if dp.index is not None and 0 <= dp.index < len(originals)
-            }
-            for dp in digest.papers:
-                if dp.index is not None and 0 <= dp.index < len(originals):
-                    shown.add(originals[dp.index].url)
-            # Every unpicked candidate is rendered in the others block —
-            # record all of them, not just the ones the agent scored.
-            for i in range(min(candidate_count, len(originals))):
-                if i not in picked:
-                    shown.add(originals[i].url)
-            # Rescued pool papers (beyond candidates) the agent scored.
+        if digest:
+            # Rescued pool papers (beyond candidates) the agent scored are
+            # rendered in the others block — record them in BOTH branches
+            # (a digest with an empty papers list still shows the others
+            # block with every unpicked candidate plus rescued papers).
             for o in digest.others or []:
                 idx = int(o.get("index", -1))
                 if 0 <= idx < len(originals):
                     shown.add(originals[idx].url)
+            if digest.papers:
+                picked = {
+                    dp.index for dp in digest.papers
+                    if dp.index is not None and 0 <= dp.index < len(originals)
+                }
+                for dp in digest.papers:
+                    if dp.index is not None and 0 <= dp.index < len(originals):
+                        shown.add(originals[dp.index].url)
+                # Every unpicked candidate is rendered in the others block —
+                # record all of them, not just the ones the agent scored.
+                for i in range(min(candidate_count, len(originals))):
+                    if i not in picked:
+                        shown.add(originals[i].url)
+            else:
+                # Empty papers list: the others block still lists every
+                # candidate (nothing was picked).
+                for i in range(min(candidate_count, len(originals))):
+                    shown.add(originals[i].url)
         else:
             shown.update(p.url for p in ranked)
         return shown
@@ -731,13 +749,16 @@ class Executor:
             t_rr = time.time()
             try:
                 ranked = self.reranker.rerank(all_papers, corpus)
+                self._rerank_failed = False
             except Exception as exc:
                 # Reranker failure (provider down, rate limit, local model
                 # load error) must never kill the daily email: degrade to
-                # fetch order with no scores, the filters below become
-                # no-ops and the render layer handles score=None.
+                # fetch order with no scores; the render layer handles
+                # score=None and min_score is skipped so nothing is silently
+                # dropped on a degraded run.
                 logger.error(f"Reranker failed ({exc}); continuing with fetch order and no scores")
                 ranked = list(all_papers)
+                self._rerank_failed = True
             logger.info(f"[stage:rerank] {len(ranked)} scored ({time.time() - t_rr:.1f}s)")
             ranked = self._filter_min_score(ranked)
             ranked = self._filter_keywords(ranked)
@@ -747,7 +768,8 @@ class Executor:
             logger.info(f"[stage:filter] {len(ranked)} candidates survive filters (max_paper_num={cap})")
             if ranked:
                 top = ranked[0]
-                logger.info(f"[stage:filter] top candidate: score={top.score:.2f} {top.title}")
+                top_score = f"{top.score:.2f}" if top.score is not None else "?"
+                logger.info(f"[stage:filter] top candidate: score={top_score} {top.title}")
             # Best-effort fetch full text for top candidates into the shared
             # disk cache (up to full_text_budget). Both engines read it: the
             # Pi agent's fetch_full_text checks the cache first, and the

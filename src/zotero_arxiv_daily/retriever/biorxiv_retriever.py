@@ -33,9 +33,9 @@ class BiorxivRetriever(BaseRetriever):
                     logger.warning(f"Failed to retrieve papers: {e!s}. Retry in {delay_time} seconds.")
                     sleep(delay_time)
         result = response.json()
-        collection = result['collection']
+        collection = result.get('collection') or []
         if len(collection) == 0:
-            logger.warning(f"No paper found. API Message: {result['messages']}")
+            logger.warning(f"No paper found. API Message: {result.get('messages')}")
             return []
         all_dates = {c['date'] for c in collection}
         latest_date = sorted(all_dates)[-1]

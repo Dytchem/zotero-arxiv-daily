@@ -125,7 +125,11 @@ def _parse_others(value) -> list[dict]:
         score = _parse_work_score(item.get("work_score"))
         if idx < 0 or score is None:
             continue
-        out.append({"index": idx, "work_score": score, "note": str(item.get("note", ""))})
+        out.append({
+            "index": idx,
+            "work_score": score,
+            "note": str(item.get("note") or ""),
+        })
     return out
 
 
@@ -512,7 +516,10 @@ class HarnessAgent:
                                 },
                             },
                         },
-                        "required": ["subject", "intro", "papers", "outro"],
+                        # subject is deliberately optional: the pipeline fixes
+                        # the email subject; the agent's creative one is
+                        # discarded (same contract as the Pi engine).
+                        "required": ["intro", "papers", "outro"],
                     },
                 },
             },
@@ -1071,6 +1078,11 @@ class HarnessAgent:
 
     @staticmethod
     def _digest_from_args(args: dict, candidate_count: int) -> Digest:
+        # str(None) would render as the literal "None" in the email — every
+        # optional text field is normalized through `or ""` first.
+        def _s(value) -> str:
+            return str(value) if value is not None else ""
+
         papers = []
         for item in args.get("papers") or []:
             try:
@@ -1080,18 +1092,18 @@ class HarnessAgent:
             papers.append(
                 DigestPaper(
                     index=idx,
-                    reason=str(item.get("reason", "")),
-                    tldr=str(item.get("tldr", "")),
+                    reason=_s(item.get("reason")),
+                    tldr=_s(item.get("tldr")),
                     work_score=_parse_work_score(item.get("work_score")),
                 )
             )
         return Digest(
-            subject=str(args.get("subject", "")),
-            intro=str(args.get("intro", "")),
+            subject=_s(args.get("subject")),
+            intro=_s(args.get("intro")),
             papers=papers,
             sections=args.get("sections") or [],
-            outro=str(args.get("outro", "")),
-            others_summary=str(args.get("others_summary", "")),
+            outro=_s(args.get("outro")),
+            others_summary=_s(args.get("others_summary")),
             others=_parse_others(args.get("others")),
         )
 

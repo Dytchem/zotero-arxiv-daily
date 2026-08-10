@@ -399,8 +399,9 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     """
     if digest is None:
         return render_fallback(originals or [])
+    originals = originals or []
     if candidate_count is None:
-        candidate_count = len(originals or [])
+        candidate_count = len(originals)
 
     title = _safe(_strip_markdown(_mathify(digest.subject))) or "Daily paper digest"
     today = _today_str()

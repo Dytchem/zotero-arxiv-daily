@@ -17,6 +17,18 @@ from loguru import logger
 from omegaconf import DictConfig
 
 
+def _connect_tls(host: str, port: int):
+    """SMTP with STARTTLS (failures propagate to the caller's fallback chain)."""
+    server = smtplib.SMTP(host, port, timeout=30)
+    try:
+        server.starttls()
+    except Exception:
+        with suppress(Exception):
+            server.quit()
+        raise
+    return server
+
+
 def _collect_receivers(config: DictConfig) -> list[str]:
     """Primary recipient + optional extras (deduped, order kept)."""
     primary = config.email.receiver
@@ -49,19 +61,23 @@ def send_email(config: DictConfig, html: str, subject: str | None = None) -> Non
     msg['Subject'] = Header(subject, 'utf-8').encode()
 
     server = None
-    try:
-        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
-        server.starttls()
-    except Exception as e:
-        logger.debug(f"Failed to use TLS. {e}\nTry to use SSL.")
-        with suppress(Exception):
-            if server is not None:
-                server.quit()
+    attempts = [
+        ("TLS", lambda: _connect_tls(smtp_server, smtp_port)),
+        ("SSL", lambda: smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)),
+        ("plain", lambda: smtplib.SMTP(smtp_server, smtp_port, timeout=30)),
+    ]
+    for label, make in attempts:
         try:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
+            server = make()
+            break
         except Exception as e:
-            logger.debug(f"Failed to use SSL. {e}\nTry to use plain text.")
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            logger.debug(f"Failed to use {label}: {e}")
+            # Release any connection made before the failure so a retry on
+            # the same port never leaks the earlier socket.
+            with suppress(Exception):
+                if server is not None:
+                    server.quit()
+                    server = None
 
     try:
         server.login(sender, password)

@@ -687,6 +687,12 @@ function buildTools(ctx) {
             `Duplicate index in papers: ${[...new Set(dupPicked)].join(", ")} — each paper can appear only once. Fix and resubmit.`
           );
         }
+        const dupOthers = (params.others || []).map((o) => o.index).filter((i, pos, arr) => arr.indexOf(i) !== pos);
+        if (dupOthers.length) {
+          return textResult(
+            `Duplicate index in others: ${[...new Set(dupOthers)].join(", ")} — each paper can be scored only once. Fix and resubmit.`
+          );
+        }
         const overlap = (params.others || []).filter((o) => picked.has(o.index)).map((o) => o.index);
         if (overlap.length) {
           return textResult(
@@ -723,15 +729,15 @@ function buildTools(ctx) {
           );
         }
         const digest = {
-          subject: params.subject,
-          intro: params.intro,
+          subject: params.subject || "",
+          intro: params.intro || "",
           papers: (params.papers || []).map((p) => ({
             index: p.index,
-            reason: p.reason,
+            reason: p.reason || "",
             tldr: p.tldr || "",
             work_score: p.work_score,
           })),
-          outro: params.outro,
+          outro: params.outro || "",
           others_summary: params.others_summary || "",
           others: (params.others || []).map((o) => ({
             index: o.index,

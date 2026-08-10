@@ -456,10 +456,15 @@ class Executor:
             return None
         # Remember the pool the digest indexes refer to, so run() can render
         # against the full pool (candidates + rest) instead of only ranked.
+        # The candidate count is stored too: top_k may have capped the
+        # candidate window, and run() must use the SAME count for rendering
+        # and sent-history or filtered-out papers get mislabelled as candidates.
         self._pi_pool = full_pool
+        self._pi_candidate_count = len(candidates)
         logger.info(
             f"Pi agent digest: {len(digest.papers)} recommended, "
-            f"{len(digest.others)} others scored (pool={len(full_pool)})"
+            f"{len(digest.others)} others scored (pool={len(full_pool)}, "
+            f"candidates={len(candidates)})"
         )
         return digest
 
@@ -686,6 +691,7 @@ class Executor:
         t_agent = time.time()
         # Reset the Pi-pool marker from any previous run on this instance.
         self._pi_pool = None
+        self._pi_candidate_count = None
         # The pool is ALL deduplicated papers from today's fetch — but still
         # filtered by sent-history: papers already shown in previous emails are
         # excluded so the agent cannot re-recommend yesterday's picks (the
@@ -700,7 +706,11 @@ class Executor:
         # (Python harness / fallback). Render against whichever space the
         # digest actually uses, so rescued non-candidate papers show properly.
         originals = self._pi_pool if self._pi_pool is not None else ranked
-        candidate_count = len(ranked)
+        # Candidate count follows the digest's index space: the post-cap count
+        # when the Pi agent succeeded, the ranked-list length otherwise.
+        candidate_count = (
+            self._pi_candidate_count if self._pi_pool is not None else len(ranked)
+        )
 
         # Decide which papers were actually recommended (for sent-history).
         if digest and digest.papers:

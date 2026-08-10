@@ -829,7 +829,7 @@ class Executor:
         language = (self.config.llm or {}).get("language", "English")
         html_content = render_email(
             digest, originals=originals, language=language,
-            candidate_count=candidate_count,
+            candidate_count=candidate_count, failures=source_failures,
         )
 
         # Archive the rendered email for debugging / review (also uploaded as

@@ -132,7 +132,7 @@ def _mathify(text: str) -> str:
 
     Parsing is delegated to pylatexenc (mature LaTeX parser: handles \\rm/
     \\mathrm fonts, \\frac, \\times, greek letters, unknown macros). Only
-    math spans ($...$ / \(...\)) go through the parser — the surrounding
+    math spans ($...$ / \\(...\\)) go through the parser — the surrounding
     prose is left untouched (pylatexenc would otherwise eat characters like
     & and _ that are plain text here). On top of the parser output we apply a
     thin display layer so the email reads well: unicode sub/superscripts
@@ -383,11 +383,15 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
     )
 
 
-def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None) -> str:
+def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None, failures: list[str] | None = None) -> str:
     """Render a Digest (or a plain fallback list) to HTML email.
 
     ``digest`` is the agent's structured output; when it is None we render the
     ``originals`` list as simple embedding-ordered cards (the graceful fallback).
+
+    ``failures`` (optional) names sources that failed to fetch — shown in the
+    empty-fallback email so a rate-limited arXiv run is not mistaken for a
+    quiet "no papers" day.
 
     ``originals`` carries the FULL paper pool the digest's indices refer to
     (candidates first, filtered-out papers after). ``candidate_count`` tells
@@ -398,7 +402,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     callers), everything in ``originals`` is treated as a candidate.
     """
     if digest is None:
-        return render_fallback(originals or [])
+        return render_fallback(originals or [], language=language, failures=failures)
     originals = originals or []
     if candidate_count is None:
         candidate_count = len(originals)
@@ -531,10 +535,32 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     return html
 
 
-def render_fallback(papers: list[Paper], language: str = "English") -> str:
-    """Gentle fallback: embedding-ordered cards with no agent editorial."""
+def render_fallback(papers: list[Paper], language: str = "English", failures: list[str] | None = None) -> str:
+    """Gentle fallback: embedding-ordered cards with no agent editorial.
+
+    ``failures`` (optional) lists sources whose retrieval failed (e.g. arXiv
+    rate-limited); when nothing was retrieved the empty email explains why
+    instead of leaving the reader wondering.
+    """
     if not papers:
         body = get_empty_html()
+        if failures:
+            if language.lower().startswith("chinese"):
+                note = (
+                    "抓取失败：<strong>" + "、".join(failures) + "</strong>"
+                    "（网络或限流问题）。请检查 GitHub Actions 运行日志。"
+                )
+            else:
+                note = (
+                    "Retrieval failed for: <strong>" + ", ".join(failures) + "</strong>"
+                    " (network or rate-limit issue). Check the GitHub Actions run log."
+                )
+            body = (
+                f'<div style="text-align:center;padding:40px 20px;">'
+                f'<div style="font-size:20px;font-weight:700;color:#111827;">No Papers Today. Take a Rest!</div>'
+                f'<div style="font-size:14px;color:#6b7280;margin-top:8px;">{note}</div>'
+                f'</div>'
+            )
     else:
         body = ""
         for _i, p in enumerate(papers):

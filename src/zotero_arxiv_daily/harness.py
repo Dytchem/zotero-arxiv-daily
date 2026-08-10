@@ -724,6 +724,8 @@ class HarnessAgent:
                     messages=messages,
                     tools=self._tool_defs(len(candidates)),
                     tool_choice="auto",
+                    **({"max_tokens": int(self.generation_kwargs.get("max_tokens") or 4096)}
+                       if self.generation_kwargs.get("max_tokens") else {}),
                 )
             except Exception as exc:
                 logger.warning(f"LLM harness call failed at step {step}: {exc}")

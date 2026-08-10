@@ -42,7 +42,7 @@ llm:
     min_inspections: 3 # Submit gate for BOTH engines: papers the agent must actually inspect before it may submit. Example: 3
     max_revisions: 2 # Python-harness only: evaluator rounds when a 'revise' verdict re-runs the generator (Pi has no separate evaluator). Example: 2
     evaluator_enabled: true # Python-harness only: independent fresh-context reviewer grades the draft (Pi relies on its ROLE.md rubric). Example: true
-    pi_timeout: 1800 # Seconds before the Pi agent subprocess is killed (fallback to Python harness) — the only real safety valve. Example: 1800
+    pi_timeout: 86400 # Seconds before the Pi agent subprocess is killed (fallback to Python harness) — the only real safety valve. Example: 86400 (24h)
 
 reranker:
   local:

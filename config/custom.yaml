@@ -27,6 +27,7 @@ llm:
     min_inspections: 3
     max_revisions: 2
     evaluator_enabled: true
+    pi_timeout: 86400
 
 source:
   arxiv:
@@ -39,7 +40,7 @@ executor:
   debug: ${oc.env:DEBUG,null}
   source: ['arxiv']
   reranker: api
-  max_paper_num: 30
+  max_paper_num: 50
   send_empty: true
 
 reranker:

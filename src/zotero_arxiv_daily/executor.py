@@ -347,6 +347,17 @@ class Executor:
         # recommended. Indexes in the digest refer to THIS pool.
         if pool is None:
             pool = candidates
+        # top_k caps how many pre-filtered candidates the Pi agent must score
+        # — same window semantics as the Python harness (harness.py caps
+        # candidates[:top_k]). The agent can still browse the ENTIRE pool via
+        # inspect_pool and rescue filtered-out papers, so only the mandatory
+        # candidates-coverage list shrinks.
+        top_k = int(harness_cfg.get("top_k", 100))
+        if top_k > 0 and len(candidates) > top_k:
+            logger.info(
+                f"Capping candidates for the Pi agent at top_k={top_k} (of {len(candidates)})"
+            )
+            candidates = candidates[:top_k]
         candidate_urls = {p.url for p in candidates}
         full_pool = list(candidates) + [p for p in pool if p.url not in candidate_urls]
         input_payload = {
@@ -357,6 +368,8 @@ class Executor:
             # thinking_level, profile, corpus, pool. max_steps / web_search_budget
             # were removed in v1.5.6 (agent runs free) and are NOT sent anymore.
             "thinking_level": harness_cfg.get("thinking_level", "max"),
+            "candidate_count": len(candidates),
+            "min_inspections": int(harness_cfg.get("min_inspections", 3)),
             "full_text_cache_max": int(self.config.executor.get("full_text_cache_max", 200)),
             "profile": {
                 "topics": profile.topics,
@@ -655,14 +668,11 @@ class Executor:
             if ranked:
                 top = ranked[0]
                 logger.info(f"[stage:filter] top candidate: score={top.score:.2f} {top.title}")
-            # Best-effort fetch full text for top candidates before the agent runs,
-            # so its inspect_paper tool has something to show. The Pi engine
-            # fetches full texts ITSELF (fetch_full_text tool / bash) — the
-            # agent decides what to read, so we only prefetch for the legacy
-            # Python harness.
-            engine = (self.config.llm.get("harness") or {}).get("engine", "pi")
-            if engine != "pi":
-                self._maybe_fetch_full_texts(ranked)
+            # Best-effort fetch full text for top candidates into the shared
+            # disk cache (up to full_text_budget). Both engines read it: the
+            # Pi agent's fetch_full_text checks the cache first, and the
+            # Python harness's inspect_paper uses it for on-demand reads.
+            self._maybe_fetch_full_texts(ranked)
 
         if not ranked and not self.config.executor.send_empty:
             logger.info("No qualifying papers found. No email will be sent.")

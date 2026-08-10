@@ -84,7 +84,7 @@ function timed(tool) {
 // ---------------------------------------------------------------------------
 
 function buildTools(ctx) {
-  const { pool, candidateCount, profile, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
+  const { pool, candidateCount, minInspections, profile, digestPath, cacheDir, fullTextCacheMax, model, library } = ctx;
   const candidates = pool; // unified index space: candidates first, rest after
   // Deep-read tracking: candidate index -> highest character offset actually
   // read via inspect_paper. Used for the soft finish_reading nudge.
@@ -675,6 +675,18 @@ function buildTools(ctx) {
             `Invalid index in others: ${badOthers.map((o) => o.index).join(", ")} — indexes must be 0..${candidates.length - 1}. Fix and resubmit.`
           );
         }
+        // Inspection gate (mirrors the Python harness): the agent must have
+        // actually engaged with (fetch_full_text / inspect_paper /
+        // summarize_paper) at least min_inspections papers before submitting,
+        // so a digest is never written on abstracts alone.
+        const requiredReads = Math.min(minInspections, candidateCount);
+        if (readSet.size < requiredReads) {
+          const missing = requiredReads - readSet.size;
+          return textResult(
+            `Too early to submit: you have only inspected ${readSet.size} paper(s) with fetch_full_text/inspect_paper. ` +
+              `Inspect at least ${requiredReads} (${missing} more) before submitting. Use fetch_full_text on the papers you are most likely to recommend.`
+          );
+        }
         // Coverage contract: EVERY unpicked CANDIDATE (index < candidateCount)
         // needs a work_score in "others" — the reader expects the same ruler
         // for every pre-filtered candidate. Papers beyond the candidate list
@@ -734,6 +746,7 @@ async function main() {
   // index space for all tools and the digest.
   const pool = input.pool || input.candidates || [];
   const candidateCount = Math.min(input.candidate_count ?? pool.length, pool.length);
+  const minInspections = input.min_inspections ?? 3;
   const profile = input.profile || {};
   const language = input.language || "English";
   const modelId = input.model || DEFAULT_MODEL;
@@ -829,6 +842,7 @@ async function main() {
   const tools = buildTools({
     pool,
     candidateCount,
+    minInspections,
     profile,
     language,
     digestPath,

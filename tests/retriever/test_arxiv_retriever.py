@@ -304,3 +304,19 @@ def test_arxiv_retriever_lookback_filters_old_papers(config, mock_feedparser, mo
     papers = retriever.retrieve_papers()
     assert len(papers) == 1
     assert papers[0].title == entries[1]["title"]
+
+
+def test_fetch_feed_with_retry_raises_after_retries(config, monkeypatch):
+    """A persistently dead feed must surface as RuntimeError (round-3 fix) so
+    run()'s per-source isolation + workflow failure notification kick in —
+    not a silent 'no papers today'."""
+    import requests as _req
+
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.arxiv_retriever.sleep", lambda s: None)
+    monkeypatch.setattr(_req, "get", lambda url, **kw: (_ for _ in ()).throw(ConnectionError("down")))
+
+    import pytest
+    with pytest.raises(RuntimeError, match="after 3 attempts"):
+        ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")

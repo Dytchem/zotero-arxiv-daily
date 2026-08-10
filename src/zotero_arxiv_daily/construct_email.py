@@ -512,41 +512,57 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
             )
 
     content = cards + others_html
-    html = framework.replace("__TITLE__", title)
-    html = html.replace("__SUMMARY__", summary)
-    html = html.replace("__PREHEADER__", _preheader(digest, language))
-    html = html.replace("__INTRO__", f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "")
-    html = html.replace("__OUTRO__", f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "")
-    html = html.replace("__FOOTER__", _footer_html(language))
-    return html.replace("__CONTENT__", content)
+    # One-pass token substitution: replaces every template token in a single
+    # scan of the framework, so LLM-authored text that happens to contain a
+    # token string (e.g. "__CONTENT__") is never re-processed afterwards.
+    html = re.sub(
+        r"__(?:TITLE|SUMMARY|PREHEADER|INTRO|OUTRO|FOOTER|CONTENT)__",
+        lambda m: {
+            "__TITLE__": title,
+            "__SUMMARY__": summary,
+            "__PREHEADER__": _preheader(digest, language),
+            "__INTRO__": f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "",
+            "__OUTRO__": f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "",
+            "__FOOTER__": _footer_html(language),
+            "__CONTENT__": content,
+        }[m.group(0)],
+        framework,
+    )
+    return html
 
 
 def render_fallback(papers: list[Paper], language: str = "English") -> str:
     """Gentle fallback: embedding-ordered cards with no agent editorial."""
     if not papers:
-        return framework.replace("__TITLE__", "Daily paper digest").replace(
-            "__SUMMARY__", "No new papers today"
-        ).replace("__PREHEADER__", "").replace("__FOOTER__", _footer_html(language)).replace(
-            "__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", get_empty_html())
-
-    body = ""
-    for _i, p in enumerate(papers):
-        body += _get_block_html(
-            title=p.title,
-            authors=", ".join((p.authors or [])[:5]),
-            reason=p.recommend_reason,
-            tldr=p.tldr,
-            url=p.url,
-            pdf_url=p.pdf_url,
-            source=p.source,
-            score=p.score,
-            language=language,
-        )
+        body = get_empty_html()
+    else:
+        body = ""
+        for _i, p in enumerate(papers):
+            body += _get_block_html(
+                title=p.title,
+                authors=", ".join((p.authors or [])[:5]),
+                reason=p.recommend_reason,
+                tldr=p.tldr,
+                url=p.url,
+                pdf_url=p.pdf_url,
+                source=p.source,
+                score=p.score,
+                language=language,
+            )
     if language.lower().startswith("chinese"):
         summary = f"共 {len(papers)} 篇论文"
     else:
         summary = f"{len(papers)} paper{'s' if len(papers) != 1 else ''} recommended"
-    return framework.replace("__TITLE__", "Daily paper digest").replace(
-        "__SUMMARY__", summary
-    ).replace("__PREHEADER__", "").replace("__FOOTER__", _footer_html(language)).replace(
-        "__INTRO__", "").replace("__OUTRO__", "").replace("__CONTENT__", body)
+    return re.sub(
+        r"__(?:TITLE|SUMMARY|PREHEADER|INTRO|OUTRO|FOOTER|CONTENT)__",
+        lambda m: {
+            "__TITLE__": "Daily paper digest",
+            "__SUMMARY__": summary,
+            "__PREHEADER__": "",
+            "__INTRO__": "",
+            "__OUTRO__": "",
+            "__FOOTER__": _footer_html(language),
+            "__CONTENT__": body,
+        }[m.group(0)],
+        framework,
+    )

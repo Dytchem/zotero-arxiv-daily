@@ -28,4 +28,7 @@ class LocalReranker(BaseReranker):
         s1_feature = encoder.encode(s1,**encode_kwargs,show_progress_bar=True)
         s2_feature = encoder.encode(s2,**encode_kwargs,show_progress_bar=True)
         sim = encoder.similarity(s1_feature, s2_feature)
-        return sim.numpy()
+        # torch tensor on CUDA cannot .numpy() directly — detach + move to CPU
+        if hasattr(sim, "detach"):
+            return sim.detach().cpu().numpy()
+        return np.asarray(sim)

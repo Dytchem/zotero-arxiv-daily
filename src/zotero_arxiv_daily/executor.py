@@ -372,8 +372,8 @@ class Executor:
             "language": agent.language,
             "cache_dir": str(cache_dir),
             # run.mjs reads only what it needs: model, language, cache paths,
-            # thinking_level, profile, corpus, pool. max_steps / web_search_budget
-            # were removed in v1.5.6 (agent runs free) and are NOT sent anymore.
+            # thinking_level, candidate_count, min_inspections, profile,
+            # corpus, pool.
             "thinking_level": harness_cfg.get("thinking_level", "max"),
             "candidate_count": len(candidates),
             "min_inspections": int(harness_cfg.get("min_inspections", 3)),
@@ -427,7 +427,6 @@ class Executor:
             in_path.write_text(json.dumps(input_payload, ensure_ascii=False), "utf8")
             if out_path.exists():
                 out_path.unlink()
-            env = dict(os.environ)
             # The Pi agent is a REAL coding agent with bash access and is fed
             # untrusted external content (paper titles/abstracts/full texts).
             # Inheriting every workflow secret would let a prompt-injected

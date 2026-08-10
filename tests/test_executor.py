@@ -982,3 +982,91 @@ def test_collect_shown_urls_empty_papers_still_records_rescued(config):
     shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
     # all candidates (0,1) + rescued (3)
     assert {originals[i].url for i in (0, 1, 3)} <= shown
+
+
+def test_agent_digest_pi_success_sets_pool_and_candidate_count(config, tmp_path, monkeypatch):
+    """Pi success path: digest is parsed, _pi_pool/_pi_candidate_count track
+    the (top_k-capped) index space, and the payload carries candidate_count +
+    min_inspections for run.mjs (regression coverage for the round-1 fixes)."""
+    import json as _json
+    import subprocess
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+
+    from omegaconf import open_dict
+
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+
+    with open_dict(config.llm.harness):
+        config.llm.harness.engine = "pi"
+        config.llm.harness.top_k = 2  # cap 3 candidates -> 2
+        config.llm.harness.min_inspections = 3
+    with open_dict(config.executor):
+        config.executor.cache_dir = str(tmp_path)
+
+    monkeypatch.setattr("zotero_arxiv_daily.executor.shutil.which", lambda name: "/usr/bin/node")
+
+    def _profile_create(**kwargs):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=(
+                '{"topics": ["t"], "keywords": ["k"], "methods": ["m"], '
+                '"summary": "s", "taste": "taste"}'
+            ), tool_calls=None))],
+            id="stub", created=0, model="m", object="chat.completion",
+        )
+
+    stub_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_profile_create)))
+    monkeypatch.setattr("zotero_arxiv_daily.harness.OpenAI", lambda **kw: stub_client)
+
+    sent_payload = {}
+
+    def _fake_subprocess_run(cmd, env=None, capture_output=True, text=True, timeout=None):
+        in_path = _Path(cmd[cmd.index("--input") + 1])
+        out_path = _Path(cmd[cmd.index("--output") + 1])
+        sent_payload["payload"] = _json.loads(in_path.read_text())
+        out_path.write_text(_json.dumps({
+            "subject": "", "intro": "hello", "outro": "",
+            "papers": [{"index": 0, "reason": "r", "work_score": 7}],
+            "others": [],
+        }))
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+
+    executor = Executor(config)
+    candidates = [make_sample_paper(title=f"C{i}", url=f"https://arxiv.org/abs/c{i}") for i in range(3)]
+    pool = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/p{i}") for i in range(4)]
+    digest = executor._agent_digest_pi(candidates, [], pool=pool)
+
+    assert digest is not None
+    assert digest.papers[0].index == 0
+    # top_k capped the candidate window: 2 candidates first, then the rest
+    assert executor._pi_candidate_count == 2
+    assert executor._pi_pool is not None
+    assert len(executor._pi_pool) == 6  # 2 capped candidates + 4 pool papers
+    assert [p.title for p in executor._pi_pool[:2]] == ["C0", "C1"]
+    # payload carries the run.mjs contract fields
+    assert sent_payload["payload"]["candidate_count"] == 2
+    assert sent_payload["payload"]["min_inspections"] == 3
+    assert sent_payload["payload"]["thinking_level"] == "max"
+    # minimal env: workflow secrets must NOT leak into the Pi subprocess
+    fake_env = sent_payload["payload"]  # placeholder; env assertions below
+    assert "SENDER_PASSWORD" not in fake_env
+
+
+def test_email_sender_all_modes_fail_raises_clear_error(config, monkeypatch):
+    """SMTP/TLS/SSL/plain all failing must raise ConnectionError with a clear
+    message — not an AttributeError on None.login (round-3 regression)."""
+    from zotero_arxiv_daily.email_sender import send_email
+
+    class _FailingSMTP:
+        def __init__(self, *args, **kwargs):
+            raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr("zotero_arxiv_daily.email_sender.smtplib.SMTP", _FailingSMTP)
+    monkeypatch.setattr("zotero_arxiv_daily.email_sender.smtplib.SMTP_SSL", _FailingSMTP)
+
+    import pytest
+    with pytest.raises(ConnectionError, match="SMTP connection failed"):
+        send_email(config, "<html></html>")

@@ -812,6 +812,28 @@ class HarnessAgent:
                             })
                             continue
                         digest = self._digest_from_args(args, len(candidates))
+                        # Duplicate / overlap contract (mirrors the Pi engine):
+                        # one index at most once, and a paper cannot be both
+                        # picked and scored in others.
+                        picked_idx = [dp.index for dp in digest.papers]
+                        dups = sorted({i for i in picked_idx if picked_idx.count(i) > 1})
+                        others_idx = {int(o.get("index", -1)) for o in (args.get("others") or [])}
+                        overlap = sorted({i for i in picked_idx if i in others_idx})
+                        if dups or overlap:
+                            problems = []
+                            if dups:
+                                problems.append(f"duplicate index(es) in papers: {dups}")
+                            if overlap:
+                                problems.append(f"index(es) in both papers and others: {overlap}")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    "Invalid digest: " + "; ".join(problems) +
+                                    ". Fix and resubmit."
+                                ),
+                            })
+                            continue
                         # Acknowledge and finish.
                         messages.append({
                             "role": "tool",

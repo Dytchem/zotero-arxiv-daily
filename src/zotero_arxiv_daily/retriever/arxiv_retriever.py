@@ -292,7 +292,10 @@ class ArxivRetriever(BaseRetriever):
                     )
                     sleep(delay)
         logger.error(f"arXiv feed fetch failed for {category} after {attempts} attempts: {last_exc}")
-        return feedparser.parse("")  # empty feed → caller sees no papers
+        # Surface the failure: run()'s per-source isolation records it in
+        # source_failures and the workflow failure notification fires —
+        # a dead feed must NOT masquerade as a quiet "no papers today".
+        raise RuntimeError(f"arXiv feed fetch failed for {category} after {attempts} attempts: {last_exc}")
 
     def convert_to_paper(self, raw_paper: dict[str, Any]) -> Paper:
         return Paper(

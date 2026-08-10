@@ -79,6 +79,11 @@ def send_email(config: DictConfig, html: str, subject: str | None = None) -> Non
                     server.quit()
                     server = None
 
+    if server is None:
+        # All connection modes failed — surface the real problem instead of
+        # a misleading AttributeError on None.login.
+        raise ConnectionError(f"SMTP connection failed for {smtp_server}:{smtp_port} (TLS/SSL/plain all failed)")
+
     try:
         server.login(sender, password)
         server.sendmail(sender, receivers, msg.as_string())

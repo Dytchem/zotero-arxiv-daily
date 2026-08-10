@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-195-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-198-brightgreen?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
@@ -42,6 +42,7 @@
 - **安全渲染** —— 所有文本字段 HTML 转义、LaTeX→Unicode、链接白名单。agent 只写 JSON，不碰标记语言。
 - **Provider 安全** —— LLM provider 从 config 中硬编码的 base URL（`llm.api.base_url`，默认 `https://opencode.ai/zen/go/v1`）+ `LLM_API_KEY` secret 编程式创建，只暴露你配置的那一个模型；Pi 内置的 provider 目录（可能静默回退到未配置的模型）从不加载。
 - **优雅降级** —— Pi 失败 → Python harness → 嵌入排序摘要。邮件永远发得出去。
+- **双提供商解绑** —— LLM（`LLM_API_KEY` → `https://opencode.ai/zen/go/v1`）与 reranker（`RERANKER_API_KEY` → `https://openrouter.ai/api/v1`）使用**相互独立的 secret**，base URL 硬编码在 config 中；两者之间不共享任何 key。
 - **无缝隙回溯、已发去重、多来源、多收件人、webhook 通知、中英双语。**
 
 ## 快速开始
@@ -108,7 +109,7 @@ agent/                    Pi agent 引擎：run.mjs、ROLE.md、fetch_text.py
                           （provider 从 config 的 llm.api.base_url + LLM_API_KEY 创建；
                            无 models.json，不加载内置 provider 目录）
 config/                   base.yaml（配置模式）+ custom.yaml（覆写）
-tests/                    195 个测试，ruff 干净
+tests/                    198 个测试，ruff 干净
 docs/HARNESS.md           生成器/评审器设计笔记
 ```
 

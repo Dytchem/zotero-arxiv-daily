@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/Dytchem/zotero-arxiv-daily/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Dytchem/zotero-arxiv-daily/ci.yml?style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.13+-blue?style=flat-square" alt="Python">
-  <img src="https://img.shields.io/badge/tests-195-brightgreen?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-198-brightgreen?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
 </p>
 
@@ -42,6 +42,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 - **Safe rendering** — every text field HTML-escaped, LaTeX→Unicode, links whitelisted. The agent writes JSON, never markup.
 - **Provider-safe by design** — the LLM provider is created programmatically from the base URL hardcoded in config (`llm.api.base_url`, default `https://opencode.ai/zen/go/v1`) + the `LLM_API_KEY` secret with *only* your configured model; Pi's built-in provider catalog (which can silently fall back to unconfigured models) is never loaded.
 - **Graceful degradation** — Pi failure → Python harness → embedding-order digest. The email always goes out.
+- **Provider unbundling** — the LLM (`LLM_API_KEY` → `https://opencode.ai/zen/go/v1`) and reranker (`RERANKER_API_KEY` → `https://openrouter.ai/api/v1`) use **independent secrets** with the base URLs hardcoded in config; nothing shares a key between them.
 - **Gap-free lookback, sent-history dedupe, multi-source, multi-recipient, webhook notifier, bilingual (EN/ZH).**
 
 ## Quick start
@@ -109,7 +110,7 @@ agent/                    Pi agent engine: run.mjs, ROLE.md, fetch_text.py
                           (provider built from config llm.api.base_url + LLM_API_KEY;
                            no models.json, no built-in provider catalog)
 config/                   base.yaml (schema) + custom.yaml (overrides)
-tests/                    195 tests, ruff-clean
+tests/                    198 tests, ruff-clean
 docs/HARNESS.md           generator/evaluator design notes
 ```
 

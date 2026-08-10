@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [1.7.0] - 2026-08-10
+
+### Changed
+- **LLM / reranker 提供商解绑**：两套模型提供商完全独立 —— LLM 用 `LLM_API_KEY` + `https://opencode.ai/zen/go/v1`，reranker 用 `RERANKER_API_KEY` + `https://openrouter.ai/api/v1`；base_url 硬编码进 config，不再共用 `OPENAI_API_KEY` / `OPENAI_API_BASE`。
+- **Pi 引擎接入 harness 参数**：
+  - `top_k` 现在同时裁剪 Pi 的候选窗口（全池仍可通过 `inspect_pool` 浏览、可救回被过滤论文）；
+  - `full_text_budget` 对 Pi 也生效 —— 预取前 N 篇进入共享磁盘缓存，Pi 的 `fetch_full_text` 优先读缓存；
+  - `min_inspections` 在 `submit_digest` 强制提交门槛（复用 Pi 的 readSet，与 Python harness 行为一致）。
+  - `max_steps` / `max_revisions` / `evaluator_enabled` 仍为 Python harness 专属（Pi 是单 agent 架构：`max_steps` 的等价物是 `pi_timeout`，无独立 evaluator）。
+- 删除死参数 `web_search_budget`（v1.5.6 起无任何消费方）；`max_tokens` 现在也作用于 Python harness 主 agent 循环（此前只到 profile 构建与 evaluator）。
+- 依赖收拢：移除未使用的 `tiktoken`、`gitignore-parser`；将直接使用的 `requests`、`numpy` 声明为显式依赖（之前 `requests` 仅靠 tiktoken 传递引入）。
+- 默认 LLM 模型切换为 `deepseek-v4-flash`（opencode zen，经 `/v1/models` 实时接口验证）；arXiv 类别按研究方向重新配置（量子光学 / 原子分子物理 / 凝聚态 + 量子信息）。
+
+### Fixed
+- **Pi 索引空间不一致**：executor 未向 run.mjs 发送 `candidate_count`，导致 run.mjs 把**整个 pool**（含被过滤论文）当作预过滤候选、强制全部打分。现正确发送，且 `top_k` 裁剪后的候选数在邮件渲染与 sent-history 去重中保持一致。
+- 本地 `config/custom.yaml` 模板与线上 `CUSTOM_CONFIG` 对齐（中文输出、`max_steps: 12` 等）。
+
 ## [1.6.0] - 2026-08-04
 
 ### Changed

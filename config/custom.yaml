@@ -17,12 +17,12 @@ llm:
   generation_kwargs:
     max_tokens: 16384
     model: deepseek-v4-flash
-  language: English
+  language: Chinese
   harness:
     enabled: true
     top_k: 100
     full_text_budget: 10
-    max_steps: 300
+    max_steps: 12
     thinking_level: max
     min_inspections: 3
     max_revisions: 2

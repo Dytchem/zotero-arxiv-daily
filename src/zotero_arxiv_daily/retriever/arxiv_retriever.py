@@ -23,6 +23,19 @@ PDF_EXTRACT_TIMEOUT = 180
 TAR_EXTRACT_TIMEOUT = 180
 
 
+def _read_retry_after(response) -> float | None:
+    """Seconds to wait from a 429 Retry-After header, if present."""
+    if response is None:
+        return None
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _download_file(url: str, path: str) -> None:
     with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as response:
         response.raise_for_status()
@@ -239,42 +252,62 @@ class ArxivRetriever(BaseRetriever):
         return raw_papers
 
     def _retrieve_from_api_fallback(self) -> list[dict[str, Any]]:
-        """RSS empty (weekend/holiday) → pull the last N days via the export API."""
+        """RSS empty (weekend/holiday) → pull the last N days via the export API.
+
+        All configured categories are merged into a SINGLE OR query: the arXiv
+        export API rate-limits aggressively by IP, and one combined request is
+        far less likely to trip the limiter than N sequential requests (each
+        of which resets the rate-limit window).
+        """
         days = int(self.config.source.arxiv.fallback_days)
         end = datetime.now(UTC)
         start = end - timedelta(days=days)
         start_s = start.strftime("%Y%m%d%H%M")
         end_s = end.strftime("%Y%m%d%H%M")
-        logger.info(f"arXiv RSS empty; falling back to API for the last {days} day(s)")
+        categories = list(self.config.source.arxiv.category)
+        logger.info(
+            f"arXiv RSS empty; falling back to API for the last {days} day(s) "
+            f"({len(categories)} categories in one merged query)"
+        )
+        query = "+OR+".join(f"cat:{c}" for c in categories)
+        query += f"+AND+submittedDate:[{start_s}+TO+{end_s}]"
+        url = (
+            "https://export.arxiv.org/api/query?"
+            f"search_query={query}&start=0&max_results=2000"
+            "&sortBy=submittedDate&sortOrder=descending"
+        )
+        feed = self._fetch_feed_with_retry(url, " + ".join(categories))
         raw_papers: list[dict[str, Any]] = []
-        for category in self.config.source.arxiv.category:
-            query = f"cat:{category}+AND+submittedDate:[{start_s}+TO+{end_s}]"
-            url = (
-                "https://export.arxiv.org/api/query?"
-                f"search_query={query}&start=0&max_results=200"
-                f"&sortBy=submittedDate&sortOrder=descending"
-            )
-            feed = self._fetch_feed_with_retry(url, category)
-            for entry in feed.entries:
-                paper = _rss_entry_to_paper(entry)
-                # The API returns a plain arXiv id (no announce-type filtering);
-                # keep everything, dedupe happens in the caller.
-                raw_papers.append(paper)
+        for entry in feed.entries:
+            paper = _rss_entry_to_paper(entry)
+            # The API returns a plain arXiv id (no announce-type filtering);
+            # keep everything, dedupe happens in the caller.
+            raw_papers.append(paper)
         return raw_papers
 
     @staticmethod
-    def _fetch_feed_with_retry(url: str, category: str, attempts: int = 3, base_delay: float = 3.0) -> Any:
+    def _fetch_feed_with_retry(url: str, category: str, attempts: int = 4, base_delay: float = 5.0) -> Any:
         """Fetch + parse an arXiv feed URL, retrying on transient failures.
 
         feedparser.parse() has no timeout and reports HTTP failures as a
         silent bozo flag, so we fetch with requests first (timeout + status
         check) and only then hand the bytes to feedparser. Without this a dead
         feed would degrade to a silent "no papers today".
+
+        Rate limits (HTTP 429) are common on arXiv's API for shared runner IPs;
+        the retry backoff grows and, when the server sends a Retry-After
+        header, we honor it instead of guessing.
         """
         last_exc: Exception | None = None
         for attempt in range(1, attempts + 1):
+            response = None
+            retry_after = None
             try:
-                response = requests.get(url, timeout=(10, 30))
+                response = requests.get(
+                    url,
+                    timeout=(10, 45),
+                    headers={"User-Agent": "zotero-arxiv-daily/1.7 (GitHub Actions; research digest)"},
+                )
                 response.raise_for_status()
                 feed = feedparser.parse(response.content)
                 # feedparser reports malformed payloads via bozo_exception;
@@ -284,8 +317,9 @@ class ArxivRetriever(BaseRetriever):
                 return feed
             except Exception as exc:
                 last_exc = exc
+                retry_after = _read_retry_after(response)
                 if attempt < attempts:
-                    delay = base_delay * attempt
+                    delay = retry_after if retry_after is not None else base_delay * attempt
                     logger.warning(
                         f"arXiv feed fetch failed for {category} (attempt {attempt}/{attempts}): "
                         f"{exc}; retrying in {delay}s"

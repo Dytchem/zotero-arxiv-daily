@@ -318,5 +318,5 @@ def test_fetch_feed_with_retry_raises_after_retries(config, monkeypatch):
     monkeypatch.setattr(_req, "get", lambda url, **kw: (_ for _ in ()).throw(ConnectionError("down")))
 
     import pytest
-    with pytest.raises(RuntimeError, match="after 3 attempts"):
+    with pytest.raises(RuntimeError, match="after 4 attempts"):
         ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")

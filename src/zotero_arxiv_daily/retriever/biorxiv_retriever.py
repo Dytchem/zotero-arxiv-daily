@@ -23,7 +23,7 @@ class BiorxivRetriever(BaseRetriever):
         delay_time = 10
         for i in range(retry_num):
             try:
-                response = requests.get(api_url)
+                response = requests.get(api_url, timeout=(10, 30))
                 response.raise_for_status()
                 break
             except Exception as e:

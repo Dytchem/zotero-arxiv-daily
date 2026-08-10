@@ -13,6 +13,15 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v7.1.4
 
+      - name: Setup node + install Pi agent
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci
+        working-directory: agent
+
       - name: Run script
         env:
           ZOTERO_ID: ${{ secrets.ZOTERO_ID }}
@@ -22,9 +31,18 @@ jobs:
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           RERANKER_API_KEY: ${{ secrets.RERANKER_API_KEY }}
+          ANYSEARCH_API_KEY: ${{ secrets.ANYSEARCH_API_KEY }} # optional: raises search_web rate limits
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           export DEBUG=true
           printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
           cat config/custom.yaml
           uv run src/zotero_arxiv_daily/main.py
+
+      - name: Upload rendered email for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-email
+          path: .cache/last_email.html
+          if-no-files-found: ignore

@@ -8,11 +8,15 @@ import pytest
 def mock_feedparser(monkeypatch):
     """Patch feedparser.parse to return the local RSS fixture for arXiv URLs.
 
-    The arxiv library passes bytes (response.content) to feedparser.parse,
-    so we check for both str and bytes URL types.
-
-    Returns the parsed result so tests can assert against it.
+    The retriever fetches feeds via requests (timeout) and hands the bytes to
+    feedparser.parse, so the requests mock echoes the URL as the response
+    content — decoding it later yields the original URL string, which keeps
+    the feedparser.parse mocks keyed by URL working unchanged.
     """
+    from types import SimpleNamespace
+
+    import requests
+
     parsed = feedparser.parse("tests/retriever/arxiv_rss_example.xml")
     # The fixture XML carries static dates (2025-08-20). Rewrite each entry's
     # published/updated timestamps to *now* so the lookback_days window filter
@@ -37,6 +41,18 @@ def mock_feedparser(monkeypatch):
         return raw_parse(url_or_bytes, *args, **kwargs)
 
     monkeypatch.setattr(feedparser, "parse", _patched)
+
+    original_get = requests.get
+
+    def _patched_get(url, **kwargs):
+        if isinstance(url, str) and "arxiv.org" in url:
+            resp = SimpleNamespace()
+            resp.content = url.encode("utf-8")
+            resp.raise_for_status = lambda: None
+            return resp
+        return original_get(url, **kwargs)
+
+    monkeypatch.setattr(requests, "get", _patched_get)
     return parsed
 
 

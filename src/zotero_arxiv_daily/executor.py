@@ -26,7 +26,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import random
 import re
 import shutil
 import subprocess
@@ -156,7 +155,7 @@ class Executor:
                 )
             ]
         if self.include_path_patterns or self.ignore_path_patterns:
-            samples = random.sample(corpus, min(5, len(corpus)))
+            samples = corpus[:min(5, len(corpus))]
             samples = '\n'.join([c.title + ' - ' + '\n'.join(c.paths) for c in samples])
             logger.info(f"Selected {len(corpus)} zotero papers:\n{samples}\n...")
         return corpus
@@ -381,7 +380,11 @@ class Executor:
             "corpus": [
                 {
                     "title": c.title,
-                    "abstract": c.abstract or "",
+                    # Abstracts truncated to keep the initial context lean —
+                    # the agent pulls the full abstract on demand via
+                    # inspect_library_paper (same budget as the Python
+                    # harness profile prompt).
+                    "abstract": (c.abstract or "")[:300],
                     "added": c.added_date.date().isoformat(),
                     "paths": c.paths or [],
                 }
@@ -417,11 +420,21 @@ class Executor:
             if out_path.exists():
                 out_path.unlink()
             env = dict(os.environ)
-            env["LLM_API_KEY"] = api_key
-            env["OPENAI_API_KEY"] = api_key
-            if api_base:
-                env["OPENAI_API_BASE"] = api_base
-            timeout = int(harness_cfg.get("pi_timeout", 900))
+            # The Pi agent is a REAL coding agent with bash access and is fed
+            # untrusted external content (paper titles/abstracts/full texts).
+            # Inheriting every workflow secret would let a prompt-injected
+            # paper exfiltrate them via curl — pass a minimal env instead.
+            env = {
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", ""),
+                "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR", ""),
+                "LLM_API_KEY": api_key,
+                "OPENAI_API_KEY": api_key,
+                "OPENAI_API_BASE": api_base or "https://opencode.ai/zen/go/v1",
+            }
+            if os.environ.get("ANYSEARCH_API_KEY"):
+                env["ANYSEARCH_API_KEY"] = os.environ["ANYSEARCH_API_KEY"]
+            timeout = int(harness_cfg.get("pi_timeout", 7200))
             proc = subprocess.run(
                 [node, str(run_mjs), "--input", str(in_path), "--output", str(out_path)],
                 env=env,
@@ -554,15 +567,30 @@ class Executor:
     # Delivery
     # ------------------------------------------------------------------
 
-    def _deliver(self, html: str, subject: str | None = None) -> None:
+    def _deliver(self, html: str, subject: str | None = None) -> bool:
+        """Deliver via every configured notifier; each failure is isolated.
+
+        Returns True when at least one notifier succeeded (the digest reached
+        the reader), so the caller only marks papers as sent when they were
+        actually shown. A notifier failing (e.g. webhook down) never prevents
+        the others from delivering.
+        """
         from .notifier import get_notifier_cls
         names = self.config.executor.get("notifiers") or ["email"]
         if not subject:
             subject = self._digest_subject()
+        delivered_any = False
         for name in names:
-            notifier = get_notifier_cls(name)(self.config)
-            logger.info(f"Delivering via notifier={name}...")
-            notifier.send(html, subject=subject)
+            try:
+                notifier = get_notifier_cls(name)(self.config)
+                logger.info(f"Delivering via notifier={name}...")
+                notifier.send(html, subject=subject)
+                delivered_any = True
+            except Exception as exc:
+                logger.error(f"[notifier:{name}] delivery failed: {exc}")
+        if not delivered_any:
+            raise RuntimeError(f"All notifiers failed to deliver the digest: {names}")
+        return delivered_any
 
     def _digest_subject(self) -> str:
         """Fixed subject format: repo name + daily recommendation + date.
@@ -619,6 +647,40 @@ class Executor:
     # Main pipeline
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _collect_shown_urls(digest, originals: list[Paper], candidate_count: int, ranked: list[Paper]) -> set[str]:
+        """URLs of every paper actually rendered in the email (for sent-history).
+
+        The email shows: picked cards + ALL unpicked candidates (the "other
+        candidates" block) + any rescued pool paper the agent scored in
+        ``others`` — mirror the render logic exactly so nothing shown to the
+        reader is re-shown on a later day. ``originals`` is the index space
+        the digest refers to; ``ranked`` is the fallback list when there is
+        no digest.
+        """
+        shown: set[str] = set()
+        if digest and digest.papers:
+            picked = {
+                dp.index for dp in digest.papers
+                if dp.index is not None and 0 <= dp.index < len(originals)
+            }
+            for dp in digest.papers:
+                if dp.index is not None and 0 <= dp.index < len(originals):
+                    shown.add(originals[dp.index].url)
+            # Every unpicked candidate is rendered in the others block —
+            # record all of them, not just the ones the agent scored.
+            for i in range(min(candidate_count, len(originals))):
+                if i not in picked:
+                    shown.add(originals[i].url)
+            # Rescued pool papers (beyond candidates) the agent scored.
+            for o in digest.others or []:
+                idx = int(o.get("index", -1))
+                if 0 <= idx < len(originals):
+                    shown.add(originals[idx].url)
+        else:
+            shown.update(p.url for p in ranked)
+        return shown
+
     def run(self):
         t0 = time.time()
         corpus = self.fetch_zotero_corpus()
@@ -628,7 +690,12 @@ class Executor:
             # Fail loudly instead of silently skipping the email: an empty corpus
             # almost always means broken Zotero credentials / filters, and the
             # workflow failure notification is the only way the owner finds out.
-            logger.error(f"No zotero papers found. Please check your zotero settings:\n{self.config.zotero}")
+            logger.error(
+                f"No zotero papers found. Please check your Zotero settings:\n"
+                f"user_id: {self.config.zotero.get('user_id')}\n"
+                f"include_path: {self.config.zotero.get('include_path')}\n"
+                f"ignore_path: {self.config.zotero.get('ignore_path')}"
+            )
             self._write_run_report(
                 corpus=0, candidates=0, ranked=0, elapsed=time.time() - t0, failures=[]
             )
@@ -662,13 +729,21 @@ class Executor:
         if all_papers:
             logger.info("Reranking papers (embedding + BM25)...")
             t_rr = time.time()
-            ranked = self.reranker.rerank(all_papers, corpus)
+            try:
+                ranked = self.reranker.rerank(all_papers, corpus)
+            except Exception as exc:
+                # Reranker failure (provider down, rate limit, local model
+                # load error) must never kill the daily email: degrade to
+                # fetch order with no scores, the filters below become
+                # no-ops and the render layer handles score=None.
+                logger.error(f"Reranker failed ({exc}); continuing with fetch order and no scores")
+                ranked = list(all_papers)
             logger.info(f"[stage:rerank] {len(ranked)} scored ({time.time() - t_rr:.1f}s)")
             ranked = self._filter_min_score(ranked)
             ranked = self._filter_keywords(ranked)
             ranked = self._filter_sent_history(ranked)
-            ranked = ranked[: int(self.config.executor.get("max_paper_num", 100))]
-            cap = self.config.executor.get("max_paper_num", 100)
+            cap = int(self.config.executor.get("max_paper_num", 100))
+            ranked = ranked[:cap]
             logger.info(f"[stage:filter] {len(ranked)} candidates survive filters (max_paper_num={cap})")
             if ranked:
                 top = ranked[0]
@@ -714,7 +789,10 @@ class Executor:
 
         # Decide which papers were actually recommended (for sent-history).
         if digest and digest.papers:
-            selected_indices = [p.index for p in digest.papers if 0 <= (p.index or -1) < len(originals)]
+            selected_indices = [
+                p.index for p in digest.papers
+                if p.index is not None and 0 <= p.index < len(originals)
+            ]
             selected_papers = [originals[i] for i in selected_indices] or ranked
         else:
             selected_papers = ranked
@@ -743,52 +821,35 @@ class Executor:
             logger.warning(f"Failed to archive rendered email: {exc}")
 
         logger.info("Delivering digest...")
-        if self.config.executor.debug:
-            # Debug mode never sends: it exists for local preview / CI review
-            # of the rendered HTML (archived above and uploaded as an
-            # artifact). Sending from a debug run would duplicate the daily
-            # email to the real inbox.
-            logger.info("Debug mode: skipping delivery (rendered HTML archived at last_email.html)")
-        else:
-            self._deliver(html_content, subject=subject)
-
-        if ranked and not self.config.executor.debug and self.config.executor.get("dedupe_history", True):
-            # Record every paper that actually made it into the email (picked
-            # cards AND the "other candidates" list, including any the agent
-            # rescued from beyond the candidate list) so that nothing already
-            # shown to the reader is re-shown on a later day. New papers keep
-            # flowing in from the feeds; yesterday's are never repeated.
-            sent = self._load_sent_history()
-            shown: set[str] = set()
-            if digest and digest.papers:
-                picked = {dp.index for dp in digest.papers if 0 <= (dp.index or -1) < len(originals)}
-                for dp in digest.papers:
-                    if 0 <= (dp.index or -1) < len(originals):
-                        shown.add(originals[dp.index].url)
-                # Unpicked candidates that appear in the "others" block.
-                for o in digest.others or []:
-                    idx = int(o.get("index", -1))
-                    if 0 <= idx < len(originals):
-                        shown.add(originals[idx].url)
-                # Fallback: if the digest carried no others list, the whole
-                # candidate set was shown (embedding-order fallback renders
-                # every candidate).
-                if not digest.others:
-                    for i in range(min(candidate_count, len(originals))):
-                        if i not in picked:
-                            shown.add(originals[i].url)
+        delivered = False
+        try:
+            if self.config.executor.debug:
+                # Debug mode never sends: it exists for local preview / CI review
+                # of the rendered HTML (archived above and uploaded as an
+                # artifact). Sending from a debug run would duplicate the daily
+                # email to the real inbox.
+                logger.info("Debug mode: skipping delivery (rendered HTML archived at last_email.html)")
             else:
-                shown.update(p.url for p in ranked)
-            sent.update(shown)
-            self._save_sent_history(sent)
+                delivered = self._deliver(html_content, subject=subject)
+        finally:
+            # sent-history + run report are written even when delivery fails
+            # (the exception propagates after the report) so a failed run stays
+            # diagnosable — but papers are only marked sent when they were
+            # actually delivered, so a missed email is retried tomorrow.
+            if ranked and delivered and self.config.executor.get("dedupe_history", True):
+                sent = self._load_sent_history()
+                shown = self._collect_shown_urls(digest, originals, candidate_count, ranked)
+                sent.update(shown)
+                self._save_sent_history(sent)
 
-        logger.info(
-            f"[summary] corpus={len(corpus)} candidates={len(all_papers)} "
-            f"ranked={len(ranked)} selected={len(selected_papers)} elapsed={time.time() - t0:.1f}s"
-        )
-        self._write_run_report(
-            corpus=len(corpus), candidates=len(all_papers),
-            ranked=len(ranked), elapsed=time.time() - t0,
-            failures=source_failures,
-        )
-        logger.info("Email sent successfully")
+            logger.info(
+                f"[summary] corpus={len(corpus)} candidates={len(all_papers)} "
+                f"ranked={len(ranked)} selected={len(selected_papers)} elapsed={time.time() - t0:.1f}s"
+            )
+            self._write_run_report(
+                corpus=len(corpus), candidates=len(all_papers),
+                ranked=len(ranked), elapsed=time.time() - t0,
+                failures=source_failures,
+            )
+            if delivered:
+                logger.info("Email sent successfully")

@@ -190,7 +190,9 @@ class ArxivRetriever(BaseRetriever):
         raw_papers: list[dict[str, Any]] = []
         total_entries = 0
         for category in self.config.source.arxiv.category:
-            feed = feedparser.parse(f"https://rss.arxiv.org/atom/{category}")
+            # Same timeout + bozo handling as the API fallback: a dead feed
+            # must surface as a failure, not a silent "no papers today".
+            feed = self._fetch_feed_with_retry(f"https://rss.arxiv.org/atom/{category}", category)
             if getattr(feed.feed, "title", "") and "Feed error for query" in feed.feed.title:
                 raise Exception(f"Invalid ARXIV_QUERY: {category}.")
             total_entries += len(feed.entries)
@@ -262,19 +264,21 @@ class ArxivRetriever(BaseRetriever):
 
     @staticmethod
     def _fetch_feed_with_retry(url: str, category: str, attempts: int = 3, base_delay: float = 3.0) -> Any:
-        """Parse an arXiv feed URL, retrying on transient HTTP/parse failures.
+        """Fetch + parse an arXiv feed URL, retrying on transient failures.
 
-        The export API rate-limits aggressively (HTTP 429); a short backoff
-        with a few attempts is enough to ride out a burst without making the
-        workflow hang.
+        feedparser.parse() has no timeout and reports HTTP failures as a
+        silent bozo flag, so we fetch with requests first (timeout + status
+        check) and only then hand the bytes to feedparser. Without this a dead
+        feed would degrade to a silent "no papers today".
         """
         last_exc: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
-                feed = feedparser.parse(url)
-                # feedparser reports HTTP errors as bozo_exception rather than
-                # raising; treat a non-OK bozo with no entries as failure.
-                # (getattr: some parsers/mocks return objects without bozo.)
+                response = requests.get(url, timeout=(10, 30))
+                response.raise_for_status()
+                feed = feedparser.parse(response.content)
+                # feedparser reports malformed payloads via bozo_exception;
+                # treat an empty bozo feed as failure so we retry / surface it.
                 if getattr(feed, "bozo", False) and not feed.entries and getattr(feed, "bozo_exception", None):
                     raise RuntimeError(f"feedparser bozo: {feed.bozo_exception}")
                 return feed
@@ -283,11 +287,11 @@ class ArxivRetriever(BaseRetriever):
                 if attempt < attempts:
                     delay = base_delay * attempt
                     logger.warning(
-                        f"arXiv API fetch failed for {category} (attempt {attempt}/{attempts}): "
+                        f"arXiv feed fetch failed for {category} (attempt {attempt}/{attempts}): "
                         f"{exc}; retrying in {delay}s"
                     )
                     sleep(delay)
-        logger.error(f"arXiv API fetch failed for {category} after {attempts} attempts: {last_exc}")
+        logger.error(f"arXiv feed fetch failed for {category} after {attempts} attempts: {last_exc}")
         return feedparser.parse("")  # empty feed → caller sees no papers
 
     def convert_to_paper(self, raw_paper: dict[str, Any]) -> Paper:

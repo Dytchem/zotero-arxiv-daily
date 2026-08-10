@@ -50,15 +50,18 @@ def send_email(config: DictConfig, html: str, subject: str | None = None) -> Non
 
     server = None
     try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
         server.starttls()
     except Exception as e:
         logger.debug(f"Failed to use TLS. {e}\nTry to use SSL.")
+        with suppress(Exception):
+            if server is not None:
+                server.quit()
         try:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
         except Exception as e:
             logger.debug(f"Failed to use SSL. {e}\nTry to use plain text.")
-            server = smtplib.SMTP(smtp_server, smtp_port)
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
 
     try:
         server.login(sender, password)

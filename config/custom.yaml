@@ -27,7 +27,7 @@ llm:
     min_inspections: 3
     max_revisions: 2
     evaluator_enabled: true
-    pi_timeout: 86400
+    pi_timeout: 7200
 
 source:
   arxiv:

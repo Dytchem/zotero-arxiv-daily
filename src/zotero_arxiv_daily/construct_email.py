@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 import re
 
+from loguru import logger
 from pylatexenc.latex2text import LatexNodes2Text
 
 from .harness import Digest, _today_str
@@ -157,6 +158,9 @@ def _mathify(text: str) -> str:
     # would swallow the $...$ and leave a plain "2", losing the subscript
     # intent, so we capture digit-only spans right after a letter ourselves.
     out = re.sub(r"(?<=[A-Za-z])\$(\d{1,3})\$", lambda m: _to_subscript(m.group(1)), text)
+    # Display math ($$...$$) first so the pair-consumption below never leaves
+    # a stray $ behind; render it through the same converter.
+    out = re.sub(r"\$\$(.+?)\$\$", lambda m: _conv(m), out, flags=re.DOTALL)
     # Math spans only: $...$ and \( ... \)
     out = re.sub(r"\$([^$]+)\$", lambda m: _conv(m), out)
     out = re.sub(r"\\\((.+?)\\\)", lambda m: _conv(m), out)
@@ -423,6 +427,11 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         # quality x relevance x taste) and the evaluator audits that ordering,
         # so the render layer trusts its judgement instead of re-sorting.
         for dp in digest.papers:
+            # Defensive: an out-of-range / negative index from the agent must
+            # never render as a broken "Paper -1" card — skip it instead.
+            if dp.index is None or not (0 <= dp.index < len(originals)):
+                logger.warning(f"Skipping digest paper with invalid index {dp.index!r}")
+                continue
             paper = originals_by_index.get(dp.index)
             title_text = paper.title if paper else f"Paper {dp.index}"
             authors = ", ".join((paper.authors or [])[:5]) if paper else ""

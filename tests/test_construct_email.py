@@ -515,3 +515,30 @@ def test_render_email_others_badges_aligned_when_picks_mid_list():
     # The picked paper is NOT in the others section at all.
     assert "Paper 1" in html
     assert "note-for-1" not in html
+
+
+def test_render_email_skips_invalid_digest_indices():
+    """Out-of-range / negative indices must be skipped, never rendered as
+    broken "Paper -1" cards."""
+    digest = Digest(
+        subject="picks",
+        intro="intro",
+        papers=[
+            DigestPaper(index=-1, reason="bad negative"),
+            DigestPaper(index=99, reason="bad huge"),
+            DigestPaper(index=0, reason="good"),
+        ],
+        outro="outro",
+    )
+    html = render_email(digest, originals=[_paper(0)])
+    assert "Sample Paper Title" in html
+    assert "good" in html
+    assert "bad negative" not in html
+    assert "bad huge" not in html
+    assert "Paper -1" not in html
+    assert "Paper 99" not in html
+
+
+def test_mathify_display_math_leaves_no_stray_dollar():
+    """$$...$$ display math is consumed entirely (no leftover $)."""
+    assert "$" not in _mathify("The formula $$\\frac{1}{2}$$ ends here.")

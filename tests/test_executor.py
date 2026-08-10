@@ -185,7 +185,7 @@ def test_fetch_zotero_corpus_keeps_empty_abstract_with_title_fallback(config, mo
 # ---------------------------------------------------------------------------
 
 
-def test_run_end_to_end(config, monkeypatch):
+def test_run_end_to_end(config, monkeypatch, tmp_path):
     """Full pipeline: Zotero fetch -> filter -> retrieve -> rerank -> agent -> email."""
     import smtplib
 
@@ -203,6 +203,10 @@ def test_run_end_to_end(config, monkeypatch):
         config.executor.source = ["arxiv"]
         config.executor.reranker = "api"
         config.executor.send_empty = False
+        # Run state (sent-history, embeddings, emails) must never touch the
+        # repo's real .cache — this test used to pollute it and could break
+        # the owner's daily run.
+        config.executor.cache_dir = str(tmp_path)
 
     # 1. Stub pyzotero
     stub_zot = make_stub_zotero_client()
@@ -843,3 +847,57 @@ def test_agent_digest_pi_returns_none_when_node_fails(config, monkeypatch):
     digest = executor._agent_digest(papers, [])
     assert isinstance(digest, Digest)  # fell back to fallback_digest path
     assert len(digest.papers) == 2
+
+
+def test_collect_shown_urls_records_picked_index_zero(config):
+    """Regression: index=0 is a VALID pick and must be recorded in sent-history
+    (the old `(p.index or -1)` falsy trap silently dropped the top pick)."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    executor = Executor(config)
+    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(3)]
+    digest = Digest(
+        subject="s", intro="", outro="",
+        papers=[DigestPaper(index=0, reason="top pick")],
+    )
+    shown = executor._collect_shown_urls(digest, originals, candidate_count=3, ranked=[])
+    assert originals[0].url in shown
+
+
+def test_collect_shown_urls_covers_all_unpicked_candidates(config):
+    """Regression: with a PARTIAL others list, every unpicked candidate shown
+    in the email's others block must still be recorded (partial coverage used
+    to leak papers into tomorrow's repeat)."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    executor = Executor(config)
+    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(4)]
+    digest = Digest(
+        subject="s", intro="", outro="",
+        papers=[DigestPaper(index=0, reason="picked")],
+        # agent only scored one unpicked candidate — the other two are still rendered
+        others=[{"index": 1, "work_score": 6.0}],
+    )
+    shown = executor._collect_shown_urls(digest, originals, candidate_count=4, ranked=[])
+    assert {originals[i].url for i in range(4)} <= shown
+
+
+def test_collect_shown_urls_includes_rescued_pool_papers(config):
+    """A filtered-out pool paper the agent scored in others is shown → recorded."""
+    from tests.canned_responses import make_sample_paper
+    from zotero_arxiv_daily.executor import Executor
+    from zotero_arxiv_daily.harness import Digest, DigestPaper
+
+    executor = Executor(config)
+    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(5)]
+    digest = Digest(
+        subject="s", intro="", outro="",
+        papers=[DigestPaper(index=0, reason="picked")],
+        others=[{"index": 4, "work_score": 5.0}],  # 4 >= candidate_count=2: rescued
+    )
+    shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
+    assert originals[4].url in shown

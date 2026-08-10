@@ -21,10 +21,20 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Setup node (for Pi agent syntax check)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Pi agent syntax check
+        run: node --check agent/run.mjs
+
       - name: Lint
         run: |
           uvx ruff check src/ tests/
 
       - name: Run Pytest
         run: |
-          uv run pytest -m "" --cov=src/zotero_arxiv_daily --cov-report=term-missing --cov-fail-under=80
+          uv run pytest --cov=src/zotero_arxiv_daily --cov-report=term-missing --cov-fail-under=80

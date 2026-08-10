@@ -668,3 +668,34 @@ def test_fallback_digest_uses_embedding_order(config, tmp_path):
 def json_dumps(obj):
     import json
     return json.dumps(obj)
+
+
+def test_generate_survives_bad_tool_call_arguments(config, tmp_path, monkeypatch):
+    """Malformed tool-call JSON / non-numeric args must nudge the model,
+    never crash the pipeline (regression: a bad tool call used to kill the
+    whole run and skip the email)."""
+    tool_script = [
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": "{not json"}}]},
+        {"type": "assistant", "tool_calls": [{"function": {"name": "inspect_paper", "arguments": '{"index": "abc"}'}}]},
+        *_submit_script(),
+    ]
+    harness, _calls = _make_harness(config, tmp_path, monkeypatch, tool_script=tool_script)
+    papers = [make_sample_paper(title=f"P{i}") for i in range(3)]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    # The two broken calls were nudged away; the script then inspected 0/1/2
+    # and submitted — the pipeline must survive and produce a digest.
+    assert digest is not None
+    assert digest.subject == "s"
+
+
+def test_generate_bails_after_repeated_no_tool_replies(config, tmp_path, monkeypatch):
+    """A model that never calls tools must bail after a few nudges instead of
+    spinning all max_steps rounds (context + cost protection)."""
+    harness, calls = _make_harness(config, tmp_path, monkeypatch)
+    with open_dict(harness.config.llm.harness):
+        harness.config.llm.harness.max_steps = 12
+    papers = [make_sample_paper(title="P0")]
+    digest = harness.generate(papers, make_sample_corpus(1))
+    assert digest is None
+    # 1 profile call + 5 nudge rounds (bail threshold) — far below max_steps.
+    assert len(calls) <= 7

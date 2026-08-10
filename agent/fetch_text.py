@@ -35,8 +35,11 @@ def main() -> int:
         authors=[],
         abstract="",
         url=url,
-        pdf_url=pdf_url,
-        source_url=source_url,
+        # run.mjs passes "" for missing optional URLs; normalize to None so
+        # the extractors' `is None` guards work (an empty URL would otherwise
+        # trigger a doomed HTTP request).
+        pdf_url=pdf_url or None,
+        source_url=source_url or None,
     )
     text = (
         extract_text_from_tar(paper)

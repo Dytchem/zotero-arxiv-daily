@@ -38,7 +38,7 @@ import { Type } from "@earendil-works/pi-ai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = __dirname;
-const DEFAULT_MODEL = "openai/gpt-5.6-luna";
+const DEFAULT_MODEL = "deepseek-v4-flash";
 
 function parseArgs(argv) {
   const args = { input: null, output: null };
@@ -169,8 +169,9 @@ function buildTools(ctx) {
           end < total
             ? `\n\nMore candidates: call inspect_candidates with start=${end}`
             : `\n\n(end of candidate list — ${total} candidates; use inspect_pool to see the full pool of ${pool.length})`;
+        const range = start < total ? `Candidates ${start}-${end - 1} of ${total}` : `No candidates at start=${start} (total ${total})`;
         return textResult(
-          `Candidates ${start}-${end - 1} of ${total} (read papers listed first):\n\n` +
+          `${range} (read papers listed first):\n\n` +
             lines.join("\n\n") +
             more
         );
@@ -218,8 +219,9 @@ function buildTools(ctx) {
           end < total
             ? `\n\nMore: call inspect_pool with start=${end}`
             : "\n\n(end of pool)";
+        const range = start < total ? `Full pool ${start}-${end - 1} of ${total}` : `No pool entries at start=${start} (total ${total})`;
         return textResult(
-          `Full pool ${start}-${end - 1} of ${total} (first ${candidateCount} are candidates; read papers listed first):\n\n` +
+          `${range} (first ${candidateCount} are candidates; read papers listed first):\n\n` +
             lines.join("\n\n") +
             more
         );
@@ -229,15 +231,15 @@ function buildTools(ctx) {
       name: "fetch_full_text",
       label: "Fetch full text",
       description:
-        "Download and extract the full text of a paper (by pool index) using the command line. The pipeline does NOT preload full texts — you decide what to read and fetch it yourself. Works for ANY paper in the pool, candidate or not. Returns the extracted text (or a cache hit) and lets you then read it page by page with inspect_paper. Papers with no accessible full text return an error; you may still judge them from the abstract with lower confidence.",
+        "Download and extract the full text of a paper (by pool index) using the command line. The pipeline may have prefetched a few top candidates into the shared cache — if a paper is already there you get the cache hit instantly; otherwise it is downloaded now. Works for ANY paper in the pool, candidate or not. Returns the extracted text and lets you then read it page by page with inspect_paper. Papers with no accessible full text return an error; you may still judge them from the abstract with lower confidence.",
       parameters: Type.Object({
         index: Type.Integer({ description: "pool index" }),
       }),
       execute: async (_toolCallId, params) => {
         toolLog("fetch_full_text", params);
-        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
+        readSet.add(params.index);
         if (p.full_text) {
           return textResult(
             `Already fetched (${p.full_text.length} chars). Use inspect_paper(index=${params.index}, offset=0) to read page by page.`
@@ -331,9 +333,9 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("inspect_paper", params);
-        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No paper at pool index ${params.index}`);
+        readSet.add(params.index);
         if (!p.full_text) {
           return textResult(
             `#${params.index} (${p.title}) has no full text loaded yet. ` +
@@ -344,9 +346,10 @@ function buildTools(ctx) {
         const full = p.full_text || "";
         const pageSize = 8000;
         // Clamp the offset: negative offsets (JS slice counts from the end)
-        // and offsets past the end would otherwise silently return garbage or
-        // an empty page while still marking the paper as "read to the end" —
-        // which would let the agent fake full reads. Reject them instead.
+        // would silently return garbage, and offsets past the end would mark
+        // the paper as "read to the end" without reading anything — which
+        // would let the agent fake full reads. Clamp to 0 and reject
+        // past-the-end offsets instead.
         const offset = Number.isFinite(params.offset) && params.offset > 0 ? Math.floor(params.offset) : 0;
         if (offset >= full.length) {
           return textResult(
@@ -517,9 +520,9 @@ function buildTools(ctx) {
       }),
       execute: async (_toolCallId, params) => {
         toolLog("summarize_paper", params);
-        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
+        readSet.add(params.index);
         const full = p.full_text || "";
         if (!full) {
           return textResult(
@@ -577,12 +580,11 @@ function buildTools(ctx) {
           description: "0-10: how confident you are in this assessment (10 = read the full paper carefully)",
         }),
       }),
-      required: ["index", "methods", "experiments", "limitations", "confidence"],
       execute: async (_toolCallId, params) => {
         toolLog("finish_reading", params);
-        readSet.add(params.index);
         const p = candidates[params.index];
         if (!p) return textResult(`No candidate at index ${params.index}`);
+        readSet.add(params.index);
         const read = readDepth.get(params.index) || 0;
         const total = (p.full_text || "").length;
         // Soft nudge, not a hard gate: a paper read via summarize_paper may have
@@ -623,7 +625,9 @@ function buildTools(ctx) {
       description:
         "Submit the final digest: your editorial decision about which papers to recommend and the full email content. Call this once when done. It ends the loop.",
       parameters: Type.Object({
-        subject: Type.String({ description: "email subject line" }),
+        // subject is Optional: the pipeline fixes the subject (ROLE.md), the
+        // agent's creative one is discarded — demanding it just wastes a turn.
+        subject: Type.Optional(Type.String({ description: "email subject line (fixed by the pipeline)" })),
         intro: Type.String({ description: "opening paragraph" }),
         papers: Type.Array(
           Type.Object({
@@ -651,7 +655,6 @@ function buildTools(ctx) {
           )
         ),
       }),
-      required: ["subject", "intro", "papers", "outro"],
       execute: async (_toolCallId, params) => {
         toolLog("submit_digest", params);
         // Data-contract checks only (the email renderer needs these fields);
@@ -673,6 +676,21 @@ function buildTools(ctx) {
         if (badOthers.length) {
           return textResult(
             `Invalid index in others: ${badOthers.map((o) => o.index).join(", ")} — indexes must be 0..${candidates.length - 1}. Fix and resubmit.`
+          );
+        }
+        // Duplicate / overlap contract: one index may appear at most once, and
+        // a paper cannot be both picked and scored in others (the renderer
+        // would show it twice).
+        const dupPicked = (params.papers || []).map((p) => p.index).filter((i, pos, arr) => arr.indexOf(i) !== pos);
+        if (dupPicked.length) {
+          return textResult(
+            `Duplicate index in papers: ${[...new Set(dupPicked)].join(", ")} — each paper can appear only once. Fix and resubmit.`
+          );
+        }
+        const overlap = (params.others || []).filter((o) => picked.has(o.index)).map((o) => o.index);
+        if (overlap.length) {
+          return textResult(
+            `Indexes in BOTH papers and others: ${overlap.join(", ")} — a paper is either recommended or in others, not both. Fix and resubmit.`
           );
         }
         // Inspection gate (mirrors the Python harness): the agent must have
@@ -844,7 +862,6 @@ async function main() {
     candidateCount,
     minInspections,
     profile,
-    language,
     digestPath,
     cacheDir,
     fullTextCacheMax,

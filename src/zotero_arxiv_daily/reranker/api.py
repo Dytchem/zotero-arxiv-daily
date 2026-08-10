@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from time import sleep
 
 import numpy as np
 from loguru import logger
@@ -37,7 +38,18 @@ class ApiReranker(BaseReranker):
         all_embeddings: list[list[float]] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            response = client.embeddings.create(input=batch, model=model)
+            # Transient provider errors (429 / 5xx / network blips) are common
+            # enough that one retry with a short backoff is worth it before
+            # the pipeline-level fallback kicks in.
+            for attempt in range(3):
+                try:
+                    response = client.embeddings.create(input=batch, model=model)
+                    break
+                except Exception as exc:
+                    if attempt == 2:
+                        raise
+                    logger.warning(f"Embedding API call failed (attempt {attempt + 1}/3): {exc}; retrying")
+                    sleep(2 * (attempt + 1))
             all_embeddings.extend(r.embedding for r in response.data)
         return all_embeddings
 

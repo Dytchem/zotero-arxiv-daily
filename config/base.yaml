@@ -42,7 +42,7 @@ llm:
     min_inspections: 3 # Submit gate for BOTH engines: papers the agent must actually inspect before it may submit. Example: 3
     max_revisions: 2 # Python-harness only: evaluator rounds when a 'revise' verdict re-runs the generator (Pi has no separate evaluator). Example: 2
     evaluator_enabled: true # Python-harness only: independent fresh-context reviewer grades the draft (Pi relies on its ROLE.md rubric). Example: true
-    pi_timeout: 86400 # Seconds before the Pi agent subprocess is killed (fallback to Python harness) — the only real safety valve. Example: 86400 (24h)
+    pi_timeout: 7200 # Seconds before the Pi agent subprocess is killed (fallback to Python harness). Must stay well UNDER the workflow job timeout so the degradation chain has room to run. Example: 7200 (2h)
 
 reranker:
   local:
@@ -69,11 +69,13 @@ executor:
   cache_dir: .cache # Directory for run-state files (sent-paper history, embeddings cache). Example: .cache
   full_text_cache_max: 200 # Max entries in the on-disk full-text cache (full_texts.json). Example: 200
   notifiers: ['email'] # Delivery channels for the digest: 'email', 'webhook' (or both). Example: ['email', 'webhook']
-  # When notifiers includes 'webhook', configure it here (example for Telegram):
-  # webhook:
-  #   url: https://api.telegram.org/bot<TOKEN>/sendMessage
-  #   format: text   # 'html' (default) or 'text'
-  #   payload_field: content   # JSON field carrying the digest text
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
   rerank_alpha: 0.7 # Hybrid rerank weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only. Example: 0.7
+
+# When executor.notifiers includes 'webhook', configure it HERE (top level —
+# notifier.py reads config.webhook.*, NOT executor.webhook). Example (Telegram):
+# webhook:
+#   url: https://api.telegram.org/bot<TOKEN>/sendMessage
+#   format: text   # 'html' (default) or 'text'
+#   payload_field: content   # JSON field carrying the digest text

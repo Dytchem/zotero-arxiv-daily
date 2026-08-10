@@ -702,6 +702,7 @@ class HarnessAgent:
 
         digest: Digest | None = None
         inspected: set[int] = set()
+        no_tool_streak = 0
         cached_tokens_total = 0
         prompt_tokens_total = 0
 
@@ -750,83 +751,118 @@ class HarnessAgent:
 
             msg = response.choices[0].message
             if not msg.tool_calls:
-                # No tool call — nudge the model (or bail after a couple tries).
+                # No tool call — nudge the model, but bail after a few
+                # consecutive nudges so a degenerate model cannot spin
+                # max_steps LLM calls (context + cost blow-up).
+                no_tool_streak += 1
+                if no_tool_streak >= 5:
+                    logger.warning(
+                        f"Model returned no tool call {no_tool_streak} times in a row; "
+                        "abandoning loop without a digest"
+                    )
+                    _log_cache_stats()
+                    return digest
                 messages.append({"role": "assistant", "content": msg.content or ""})
                 messages.append({
                     "role": "user",
                     "content": "Please either continue inspecting or call submit_digest to finish.",
                 })
                 continue
+            no_tool_streak = 0
 
             messages.append(msg)
             for tc in msg.tool_calls:
-                name = tc.function.name
-                args = json.loads(tc.function.arguments or "{}")
-                if name == "submit_digest":
-                    if len(inspected) < min(min_inspections, len(candidates)):
-                        missing = min(min_inspections, len(candidates)) - len(inspected)
+                try:
+                    name = tc.function.name
+                    args = json.loads(tc.function.arguments or "{}")
+                except Exception as exc:
+                    # A malformed tool call (bad JSON) must never kill the
+                    # whole pipeline — nudge the model to resubmit instead.
+                    logger.warning(f"Bad tool call from LLM: {exc}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": (
+                            f"Your tool call could not be parsed ({exc}). "
+                            "Resubmit with valid JSON arguments."
+                        ),
+                    })
+                    continue
+                try:
+                    if name == "submit_digest":
+                        if len(inspected) < min(min_inspections, len(candidates)):
+                            missing = min(min_inspections, len(candidates)) - len(inspected)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    f"Too early to submit: you have only inspected "
+                                    f"{len(inspected)} paper(s) with inspect_paper. "
+                                    f"Inspect at least {min(min_inspections, len(candidates))} "
+                                    f"({missing} more) before submitting. Use inspect_paper "
+                                    f"on the candidates you are most likely to recommend."
+                                ),
+                            })
+                            continue
+                        digest = self._digest_from_args(args, len(candidates))
+                        # Acknowledge and finish.
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": (
-                                f"Too early to submit: you have only inspected "
-                                f"{len(inspected)} paper(s) with inspect_paper. "
-                                f"Inspect at least {min(min_inspections, len(candidates))} "
-                                f"({missing} more) before submitting. Use inspect_paper "
-                                f"on the candidates you are most likely to recommend."
-                            ),
+                            "content": "Digest received.",
                         })
-                        continue
-                    digest = self._digest_from_args(args, len(candidates))
-                    # Acknowledge and finish.
+                        _log_cache_stats()
+                        return digest
+                    elif name == "inspect_candidates":
+                        start = int(args.get("start", 0))
+                        count = min(int(args.get("count", 20)), 20)
+                        result = self._describe_candidates(candidates, start, count)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        })
+                    elif name == "inspect_paper":
+                        idx = int(args.get("index", -1))
+                        offset = int(args.get("offset", 0) or 0)
+                        if 0 <= idx < len(candidates):
+                            inspected.add(idx)
+                        result = self._describe_paper(candidates, idx, offset=offset)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        })
+                    elif name == "search_candidates":
+                        result = self._search_candidates(candidates, str(args.get("query", "")))
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        })
+                    elif name == "compare_papers":
+                        a = int(args.get("index_a", -1))
+                        b = int(args.get("index_b", -1))
+                        result = self._compare_papers(candidates, a, b)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        })
+                    else:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": "Unknown tool.",
+                        })
+                except Exception as exc:
+                    # Any tool-handler failure (bad arg types, index errors)
+                    # must degrade to a nudge, never crash the pipeline.
+                    logger.warning(f"Tool call {name!r} failed: {exc}")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": "Digest received.",
-                    })
-                    _log_cache_stats()
-                    return digest
-                elif name == "inspect_candidates":
-                    start = int(args.get("start", 0))
-                    count = min(int(args.get("count", 20)), 20)
-                    result = self._describe_candidates(candidates, start, count)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
-                elif name == "inspect_paper":
-                    idx = int(args.get("index", -1))
-                    offset = int(args.get("offset", 0) or 0)
-                    if 0 <= idx < len(candidates):
-                        inspected.add(idx)
-                    result = self._describe_paper(candidates, idx, offset=offset)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
-                elif name == "search_candidates":
-                    result = self._search_candidates(candidates, str(args.get("query", "")))
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
-                elif name == "compare_papers":
-                    a = int(args.get("index_a", -1))
-                    b = int(args.get("index_b", -1))
-                    result = self._compare_papers(candidates, a, b)
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
-                else:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": "Unknown tool.",
+                        "content": f"Your tool call could not be handled ({exc}). Resubmit with valid arguments.",
                     })
 
         _log_cache_stats()

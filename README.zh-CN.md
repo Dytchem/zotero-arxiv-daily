@@ -34,13 +34,13 @@
 ## 核心特性
 
 - **Pi agent 引擎**（`agent/run.mjs` + `agent/ROLE.md`）—— 一个真正的编码 agent，自带工具：`inspect_candidates`、`inspect_pool`、`fetch_full_text`、`inspect_paper`（分页）、`summarize_paper`（长文子 agent）、`search_web`、`search_candidates`、`compare_papers`、`finish_reading`、`submit_digest`。它自己决定读什么、自己抓全文精读，每一条推荐都基于实际内容。
-- **全池可见** —— agent 看到当天去重后的*全部*论文，包括被关键词/最低分/数量上限过滤器丢掉的。被启发式漏掉的高价值论文可以被救回、精读并推荐，邮件里带 "pool" 标注。
+- **全池可见** —— agent 看到当天去重后的*全部*论文，包括被关键词/最低分/数量上限过滤器丢掉的。被启发式漏掉的高价值论文可以被救回、精读并推荐，出现在邮件的"其他候选"区（救回论文与其他候选一样按相关度排序）。
 - **推荐度评分** —— 每个候选（选中与否）都有**推荐度**徽章（0–10），评判严谨性、新颖性和来源可信度。水文/低质论文即使看似相关也会被点名。
 - **可辩护的排序** —— 更强的推荐在前；读者可以对比徽章。
 - **保证读全文** —— 阅读进度被追踪；一篇论文必须真正读过（而非扫标题）才能被推荐。长文交给子 agent，子 agent **一次性读完全文**（不再分块截断，跨章节关联不丢失）；已读论文在 agent 的候选/全池列表中置顶并标 `[READ]`（pool 索引保持稳定）。
 - **成本可控** —— agent 先从摘要给全池打分，只对短名单（约 8 篇）精读；长文子 agent 一次性读完全文。单次运行费用远低于 $0.20。无硬限制 —— agent 觉得需要时可以读更多。
 - **安全渲染** —— 所有文本字段 HTML 转义、LaTeX→Unicode、链接白名单。agent 只写 JSON，不碰标记语言。
-- **Provider 安全** —— LLM provider 从 config 中硬编码的 base URL（`llm.api.base_url`，默认 `https://opencode.ai/zen/go/v1`）+ `LLM_API_KEY` secret 编程式创建，只暴露你配置的那一个模型；Pi 内置的 provider 目录（可能静默回退到未配置的模型）从不加载。
+- **Provider 安全** —— LLM provider 从 config 中硬编码的 base URL（`llm.api.base_url`，默认 `https://opencode.ai/zen/go/v1`）+ `LLM_API_KEY` secret 编程式创建，只暴露你配置的那一个模型；Pi 内置的 provider 目录（可能静默回退到未配置的模型如 xiaomi/mimo）加载后立即清空，只保留自定义 provider。
 - **优雅降级** —— Pi 失败 → Python harness → 嵌入排序摘要。邮件永远发得出去。
 - **双提供商解绑** —— LLM（`LLM_API_KEY` → `https://opencode.ai/zen/go/v1`）与 reranker（`RERANKER_API_KEY` → `https://openrouter.ai/api/v1`）使用**相互独立的 secret**，base URL 硬编码在 config 中；两者之间不共享任何 key。
 - **无缝隙回溯、已发去重、多来源、多收件人、webhook 通知、中英双语。**

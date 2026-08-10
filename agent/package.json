@@ -1,10 +1,9 @@
 {
   "name": "agent",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Pi agent engine for zotero-arxiv-daily (run.mjs + ROLE.md)",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check": "node --check run.mjs"
   },
   "keywords": [],
   "author": "",

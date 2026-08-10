@@ -58,6 +58,9 @@ candidate papers (metadata + embedding relevance hint), produce the digest:
 
 ## Your tools
 
+- `inspect_library_paper` — read the FULL abstract of one paper from the
+  researcher's Zotero library (by its index in the library list). Use it to
+  calibrate taste when a short abstract is not enough.
 - `inspect_candidates` — page through the pre-filtered candidates (0..
   candidate_count-1, with embedding score).
 - `inspect_pool` — browse ALL of today's papers, including ones the filter
@@ -67,6 +70,8 @@ candidate papers (metadata + embedding relevance hint), produce the digest:
   index) when you decide to read it.
 - `inspect_paper` — read the full text page by page (offset = character
   offset). Also shows authors/abstract.
+- `summarize_paper` — delegate a LONG paper to a sub-agent that reads the
+  entire full text in one pass and returns structured notes.
 - `search_candidates` — filter the full pool by keywords.
 - `search_web` — verify provenance, authors, venue, or any claim. Use a
   handful per run at most, only when it changes your judgement.

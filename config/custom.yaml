@@ -34,7 +34,7 @@ source:
     category: ["quant-ph", "physics.atom-ph", "physics.optics", "physics.chem-ph", "cond-mat.quant-gas", "cond-mat.mes-hall", "cond-mat.str-el", "cond-mat.mtrl-sci", "cond-mat.supr-con", "cs.ET"]
     include_cross_list: false
     lookback_days: 2
-    fallback_days: 7
+    fallback_days: null  # disabled: no new papers → send nothing, do not dig up old ones
 
 executor:
   debug: ${oc.env:DEBUG,null}

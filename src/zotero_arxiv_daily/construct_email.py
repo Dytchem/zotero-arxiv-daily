@@ -178,11 +178,19 @@ def _clean_link(url: str | None) -> str | None:
     return url
 
 
-def get_empty_html() -> str:
+def get_empty_html(language: str = "English") -> str:
+    if language.lower().startswith("chinese"):
+        return """
+    <div style="text-align:center;padding:48px 24px;">
+      <div style="font-size:32px;margin-bottom:12px;">☕️</div>
+      <div style="font-size:20px;font-weight:700;color:#111827;">今日暂无相关新论文</div>
+      <div style="font-size:14px;color:#6b7280;margin-top:10px;line-height:1.7;">在你订阅的分类中今日未检索到新论文<br>可能是 arXiv 节假日暂停更新，或暂无符合你研究画像的内容<br><span style="color:#9ca3af;">好好休息，明天再见！</span></div>
+    </div>
+    """
     return """
     <div style="text-align:center;padding:40px 20px;">
       <div style="font-size:20px;font-weight:700;color:#111827;">No Papers Today. Take a Rest!</div>
-      <div style="font-size:14px;color:#6b7280;margin-top:8px;">Your Zotero library had no new matching papers today.</div>
+      <div style="font-size:14px;color:#6b7280;margin-top:8px;">No new papers matched your library today. It may be a holiday with no arXiv updates — enjoy the break!</div>
     </div>
     """
 
@@ -308,6 +316,10 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
 def _preheader(digest: Digest, language: str) -> str:
     """Inbox-preview text: a short, skimmable teaser of the digest."""
     n = len(digest.papers)
+    if n == 0:
+        if language.lower().startswith("chinese"):
+            return "今日暂无新论文 · 休息一下，明天再见"
+        return "No new papers today · take a rest"
     if language.lower().startswith("chinese"):
         head = f"今日精选 {n} 篇论文"
     else:
@@ -414,13 +426,23 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     # "Zotero-arXiv-Daily Daily Digest · 2026-08-03"). Any 4-digit year in
     # the title means the date is already there.
     subject_has_date = bool(re.search(r"\d{4}", title))
-    if language.lower().startswith("chinese"):
-        summary = (f"{today} · " if not subject_has_date else "") + f"精选 {len(digest.papers)} 篇论文"
+    n = len(digest.papers)
+    # Empty digest: don't show "精选 0 篇论文" + "以下是今天..." which feels like a broken list
+    if n == 0:
+        if language.lower().startswith("chinese"):
+            summary = "今日暂无更新 — 休息一下 ☕"
+        else:
+            summary = "No new papers today — take a rest ☕"
+        intro = ""
+        outro = ""
     else:
-        n_label = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
-        summary = (f"{today} · " if not subject_has_date else "") + n_label
-    intro = _safe(_strip_markdown(_mathify(digest.intro)))
-    outro = _safe(_strip_markdown(_mathify(digest.outro)))
+        if language.lower().startswith("chinese"):
+            summary = (f"{today} · " if not subject_has_date else "") + f"精选 {len(digest.papers)} 篇论文"
+        else:
+            n_label = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
+            summary = (f"{today} · " if not subject_has_date else "") + n_label
+        intro = _safe(_strip_markdown(_mathify(digest.intro)))
+        outro = _safe(_strip_markdown(_mathify(digest.outro)))
 
     cards = ""
     selected_indices: set[int] = set()
@@ -455,7 +477,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
             )
             selected_indices.add(dp.index)
     else:
-        cards = get_empty_html()
+        cards = get_empty_html(language)
 
     # Remaining candidates (not picked by the agent) go at the bottom as a
     # compact list — still visible, with the same Relevance + Recommendation badges as
@@ -543,7 +565,7 @@ def render_fallback(papers: list[Paper], language: str = "English", failures: li
     instead of leaving the reader wondering.
     """
     if not papers:
-        body = get_empty_html()
+        body = get_empty_html(language)
         if failures:
             if language.lower().startswith("chinese"):
                 note = (

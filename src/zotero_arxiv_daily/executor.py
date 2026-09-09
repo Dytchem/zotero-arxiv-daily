@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 from loguru import logger
@@ -292,6 +293,11 @@ class Executor:
         Paper objects (in pool order, first ``len(candidates)`` of the pool).
         """
         engine = (self.config.llm.get("harness") or {}).get("engine", "pi")
+        # One stable OpenCode Go session id per run: the Python harness picks
+        # it up via OPENCODE_SESSION_ID (see HarnessAgent) and the Pi engine
+        # inherits it through its subprocess env below, so profile + agent +
+        # evaluator share routing/prompt-cache affinity.
+        os.environ["OPENCODE_SESSION_ID"] = os.environ.get("OPENCODE_SESSION_ID") or uuid.uuid4().hex
         if engine == "pi":
             digest = self._agent_digest_pi(candidates, corpus, pool=pool)
             if digest is not None:
@@ -437,6 +443,7 @@ class Executor:
                 "LLM_API_KEY": api_key,
                 "OPENAI_API_KEY": api_key,
                 "OPENAI_API_BASE": api_base or "https://opencode.ai/zen/go/v1",
+                "OPENCODE_SESSION_ID": os.environ.get("OPENCODE_SESSION_ID") or uuid.uuid4().hex,
             }
             if os.environ.get("UV_CACHE_DIR"):
                 env["UV_CACHE_DIR"] = os.environ["UV_CACHE_DIR"]

@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -257,7 +259,23 @@ class HarnessAgent:
             )
             self.client = None
         else:
-            self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
+            # OpenCode Go (zen/go) requires a stable `x-opencode-session` id
+            # per conversation for routing/prompt-caching; without it every
+            # call 400s with MissingSessionID and the digest degrades to the
+            # headerless embedding-order fallback (2026-09-10 incident: 50
+            # bare cards with no reasons). One id per run is shared by the
+            # profile/generator/evaluator calls via the client below; the Pi
+            # engine reuses it through OPENCODE_SESSION_ID (see executor).
+            self.opencode_session_id = os.environ.get("OPENCODE_SESSION_ID") or uuid.uuid4().hex
+            os.environ["OPENCODE_SESSION_ID"] = self.opencode_session_id
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base,
+                default_headers={
+                    "x-opencode-session": self.opencode_session_id,
+                    "User-Agent": "zotero-arxiv-daily/1.0",
+                },
+            )
             self.generation_kwargs = dict(llm_cfg.get("generation_kwargs") or {})
             self.generation_kwargs["model"] = self.model
 

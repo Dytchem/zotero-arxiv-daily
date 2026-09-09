@@ -25,6 +25,7 @@
 // excludes Pi's built-in providers (whose model catalogs include models like
 // xiaomi/mimo that would silently be called with the same key).
 
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -542,7 +543,14 @@ function buildTools(ctx) {
         const usr = `Paper: ${p.title}\n${params.focus ? `Focus: ${params.focus}\n` : ""}Full text (${full.length} chars):\n\n${full}`;
         const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            // OpenCode Go (zen/go) requires a stable session id per
+            // conversation; without it the call 400s with MissingSessionID.
+            "x-opencode-session": process.env.OPENCODE_SESSION_ID || "zotero-arxiv-daily-fallback",
+            "User-Agent": "zotero-arxiv-daily/1.0",
+          },
           body: JSON.stringify({
             model: typeof model === "string" ? model : model?.id,
             messages: [
@@ -800,6 +808,15 @@ async function main() {
 
   // 从环境变量读 baseUrl 和 apiKey
   const baseUrl = process.env.OPENAI_API_BASE || "https://opencode.ai/zen/go/v1";
+  // OpenCode Go (zen/go) requires a stable `x-opencode-session` id per
+  // conversation for routing/prompt-caching (MissingSessionID 400 without
+  // it). executor.py passes one stable id per run via OPENCODE_SESSION_ID;
+  // the local fallback keeps ad-hoc runs working (no shared cache affinity).
+  const opencodeSessionId = process.env.OPENCODE_SESSION_ID || `local-${randomUUID()}`;
+  const opencodeHeaders = {
+    "x-opencode-session": opencodeSessionId,
+    "User-Agent": "zotero-arxiv-daily/1.0",
+  };
 
   // 创建自定义 provider。注意 auth 必须嵌套为 { apiKey: ... }：
   // Pi 的 checkAuth 读 provider.auth.apiKey，平铺的 envApiKeyAuth 会让
@@ -808,6 +825,7 @@ async function main() {
   const customProvider = createProvider({
     id: "custom",
     baseUrl,
+    headers: { ...opencodeHeaders },
     auth: { apiKey: envApiKeyAuth("API key", ["LLM_API_KEY", "OPENAI_API_KEY"]) },
     models: [
       {
@@ -816,6 +834,7 @@ async function main() {
         api: "openai-completions",
         provider: "custom",
         baseUrl,
+        headers: { ...opencodeHeaders },
         reasoning: true,
         thinkingLevelMap: { xhigh: "xhigh", max: "max" },
         input: ["text", "image"],

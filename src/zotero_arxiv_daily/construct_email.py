@@ -101,8 +101,16 @@ def _to_superscript(s: str) -> str:
 
 
 def _safe(text: str | None) -> str:
-    """HTML-escape a text field, keeping the output safe to inline."""
-    return html.escape(text or "", quote=True)
+    """HTML-escape a text field, keeping the output safe to inline.
+
+    Stray carriage returns are stripped: the agent sometimes writes LaTeX
+    like ``|g\rangle`` inside its JSON payload, where ``\r`` is a VALID
+    JSON escape (carriage return) — json.loads then destroys the command
+    into CR + "angle" (seen live 2026-09-10: "|gangle"). _mathify repairs
+    the known cases; this strip is the last line of defense for fields that
+    bypass it (e.g. author names). A raw CR must never reach email HTML.
+    """
+    return html.escape((text or "").replace("\r\n", "\n").replace("\r", ""), quote=True)
 
 
 def _strip_markdown(text: str) -> str:
@@ -127,6 +135,40 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
+def _repair_json_escapes(text: str) -> str:
+    """Repair LaTeX destroyed by JSON parsing before any other processing.
+
+    The agent writes its digest as JSON, where ``\r`` is a valid escape
+    (carriage return). A LaTeX command like ``|g\rangle`` therefore arrives
+    as CR + "angle" — the backslash is already gone by render time, so the
+    normal LaTeX converter can never see it (live incident 2026-09-10:
+    "基态 |gangle 与里德堡态 |rangle"). Repair the CR remnant plus any
+    surviving backslash forms (from ``\\\\`` in JSON) into unicode
+    angle brackets. Applied to every prose field via _mathify.
+    """
+    if not text:
+        return text
+    text = re.sub(r"\r\n?angle\b", "⟩", text)
+    text = re.sub(r"\r\n?langle\b", "⟨", text)
+    text = text.replace("\\rangle", "⟩").replace("\\langle", "⟨")
+    return text
+
+
+def _latex_plain(text: str) -> str:
+    """Convert text-mode LaTeX (accents etc.) to unicode, best-effort.
+
+    arXiv metadata carries accents as LaTeX (``Juli\\`a-Farr\\'e``) and
+    the agent's prose can too. Never raises: on parse failure the input is
+    returned unchanged.
+    """
+    if not text or "\\" not in text:
+        return text
+    try:
+        return _LATEX_TO_TEXT.latex_to_text(text)
+    except Exception:
+        return text
+
+
 def _mathify(text: str) -> str:
     """Convert LaTeX math in prose to readable plain text.
 
@@ -141,6 +183,10 @@ def _mathify(text: str) -> str:
     """
     if not text:
         return text
+
+    # First: repair LaTeX destroyed upstream by JSON parsing (\rangle ->
+    # CR + "angle"); see _repair_json_escapes.
+    text = _repair_json_escapes(text)
 
     def _conv(match: re.Match) -> str:
         out = _LATEX_TO_TEXT.latex_to_text(match.group(1))
@@ -164,6 +210,10 @@ def _mathify(text: str) -> str:
     # Math spans only: $...$ and \( ... \)
     out = re.sub(r"\$([^$]+)\$", lambda m: _conv(m), out)
     out = re.sub(r"\\\((.+?)\\\)", lambda m: _conv(m), out)
+    # Final pass: text-mode leftovers the span parser never sees — author
+    # names and titles from arXiv metadata (Juli\`a-Farr\'e), or agent
+    # prose with bare accents. Only runs when a backslash survived.
+    out = _latex_plain(out)
     return out
 
 def _clean_link(url: str | None) -> str | None:
@@ -301,16 +351,34 @@ def _get_block_html(title, authors, reason, tldr, url, pdf_url, source, score=No
             f'<tr>{buttons}</tr></table>'
         )
 
+    # Authors come straight from arXiv metadata and often carry text-mode
+    # LaTeX accents (Juli\`a-Farr\'e) — convert to unicode before escaping.
+    authors_html = _safe(_latex_plain(authors))
+
     return f"""
     <div class="card" style="border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:24px;background:#ffffff;">
       {badge_html}
       <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.4;">{title_html}</div>
-      <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{_safe(authors)}</div>
+      <div style="font-size:13px;color:#6b7280;margin-top:8px;line-height:1.5;">{authors_html}</div>
       <div style="margin-top:10px;">{_rate_html(score, language)} {_work_html(work_score, language)}</div>
       {note_html}
       <div style="margin-top:14px;">{buttons}</div>
     </div>
     """
+
+
+def _legend_html(language: str = "English") -> str:
+    """One-line badge legend so the two scores are never a mystery."""
+    if language.lower().startswith("chinese"):
+        text = ("相关度：与你研究方向的匹配（语义检索分）；"
+                "推荐度：论文本身的工作质量（LLM 评分，≥7 优秀 · 5–7 扎实 · <5 偏水）")
+    else:
+        text = ("Relevance: match to your research direction (semantic retrieval); "
+                "Recommendation: the paper's own merit (LLM score, ≥7 excellent · 5–7 solid · <5 weak)")
+    return (
+        f'<div style="font-size:12px;color:#9ca3af;line-height:1.5;margin:-8px 0 20px;">'
+        f'{_safe(text)}</div>'
+    )
 
 
 def _preheader(digest: Digest, language: str) -> str:
@@ -341,7 +409,7 @@ def _footer_html(language: str) -> str:
     return "To unsubscribe, remove your email in your GitHub Actions settings."
 
 
-def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None) -> str:
+def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None, max_others: int | None = 15) -> str:
     """Compact list of candidates the agent did not pick (bottom of the email).
 
     Each entry shows the same Relevance + Recommendation badges as the picked cards
@@ -352,9 +420,19 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
     ``indices`` (optional) carries the ORIGINAL candidate index for each
     entry in ``papers`` — ``others_map`` is keyed by original index, so this
     keeps the badges aligned after the list was re-indexed from 0.
+
+    ``max_others`` caps the list (default 15): the caller sorts annotated
+    entries first, so the cap keeps the most informative ones. Overflow is
+    disclosed with an explicit count line — never silently dropped.
     """
     heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
     others_map = others_map or {}
+    total = len(papers)
+    hidden = 0
+    if max_others is not None and len(papers) > max_others:
+        hidden = len(papers) - max_others
+        papers = papers[:max_others]
+        indices = indices[:max_others] if indices else None
     rows = ""
     for i, p in enumerate(papers):
         orig_index = indices[i] if indices else i
@@ -387,15 +465,25 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
             f'border-radius:6px;margin-bottom:8px;">'
             f'{_safe(_strip_markdown(_mathify(others_summary)))}</div>'
         )
+    overflow_html = ""
+    if hidden:
+        if language.lower().startswith("chinese"):
+            overflow_text = f"以上为相关度最高的 {len(papers)} 篇，其余 {hidden} 篇未入选候选已略去（共 {total} 篇）"
+        else:
+            overflow_text = f"Top {len(papers)} by relevance shown, {hidden} more unpicked candidates omitted ({total} total)"
+        overflow_html = (
+            f'<div style="font-size:12px;color:#9ca3af;margin-top:6px;">'
+            f'{_safe(overflow_text)}</div>'
+        )
     return (
         f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'
         f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">{heading}</div>'
         f'{summary_html}'
-        f'{rows}</div>'
+        f'{rows}{overflow_html}</div>'
     )
 
 
-def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None, failures: list[str] | None = None) -> str:
+def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None, failures: list[str] | None = None, max_others: int | None = 15) -> str:
     """Render a Digest (or a plain fallback list) to HTML email.
 
     ``digest`` is the agent's structured output; when it is None we render the
@@ -535,8 +623,16 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 others_summary=digest.others_summary or "",
                 others_map=others_map,
                 indices=others_indices,
+                max_others=max_others,
             )
 
+    intro_html = ""
+    if intro:
+        intro_html = f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>'
+        if n > 0:
+            # Badge legend directly under the intro: readers meet both scores
+            # on the first card, so explain them once up front.
+            intro_html += _legend_html(language)
     content = cards + others_html
     # One-pass token substitution: replaces every template token in a single
     # scan of the framework, so LLM-authored text that happens to contain a
@@ -547,7 +643,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
             "__TITLE__": title,
             "__SUMMARY__": summary,
             "__PREHEADER__": _preheader(digest, language),
-            "__INTRO__": f'<div style="font-size:15px;color:#374151;line-height:1.6;margin-bottom:20px;">{intro}</div>' if intro else "",
+            "__INTRO__": intro_html,
             "__OUTRO__": f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "",
             "__FOOTER__": _footer_html(language),
             "__CONTENT__": content,

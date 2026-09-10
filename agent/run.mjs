@@ -658,7 +658,7 @@ function buildTools(ctx) {
             Type.Object({
               index: Type.Integer(),
               work_score: Type.Number({ description: "quality judgement 0-10, same scale" }),
-              note: Type.Optional(Type.String({ description: "optional one-line why-not note" })),
+              note: Type.String({ description: "REQUIRED one-line note: what the paper is + why it was not picked. A bare score with no note looks unfinished in the email." }),
             })
           )
         ),

@@ -163,6 +163,16 @@ def _latex_plain(text: str) -> str:
     """
     if not text or "\\" not in text:
         return text
+    # Stray escaped quotes from double-escaped JSON payloads (live
+    # 2026-09-10: agent wrote \"其余候选\", parsed text kept \", and the
+    # converter below read it as a diaeresis accent — rendering 其̈/中̈).
+    # \" \\' \\` are accents ONLY before ASCII letters (\\\"u -> ü);
+    # before CJK/punct/space they are escaped quotes — unescape first.
+    text = re.sub(r'\\"(?![A-Za-z])', '"', text)
+    text = re.sub(r"\\'(?![A-Za-z])", "'", text)
+    text = re.sub(r"\\`(?![A-Za-z])", "`", text)
+    if "\\" not in text:
+        return text
     try:
         return _LATEX_TO_TEXT.latex_to_text(text)
     except Exception:

@@ -542,3 +542,76 @@ def test_render_email_skips_invalid_digest_indices():
 def test_mathify_display_math_leaves_no_stray_dollar():
     """$$...$$ display math is consumed entirely (no leftover $)."""
     assert "$" not in _mathify("The formula $$\\frac{1}{2}$$ ends here.")
+
+
+def test_json_escape_rangle_repaired():
+    """Regression 2026-09-10: agent wrote |g\\rangle in JSON; \\r is a valid
+    JSON escape (CR), so the text arrived as CR + 'angle' ('|gangle').
+    The renderer must repair it to |g⟩ and never leak a raw CR."""
+    digest = Digest(
+        subject="s", intro="i",
+        papers=[DigestPaper(index=0, reason="基态 |g\rangle 与里德堡态 |r\rangle 编码")],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "|g⟩" in html
+    assert "|r⟩" in html
+    assert "gangle" not in html
+    assert "\r" not in html
+
+
+def test_backslash_rangle_repaired():
+    """Surviving single-backslash forms (from \\\\ in JSON) also convert."""
+    digest = Digest(
+        subject="s", intro="i",
+        papers=[DigestPaper(index=0, reason="uses \\rangle and \\langle brackets")],
+        outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)])
+    assert "⟩" in html
+    assert "⟨" in html
+    assert "rangle" not in html
+
+
+def test_author_latex_accents_converted():
+    """arXiv author names carry text-mode LaTeX (Juli\\`a-Farr\\'e) —
+    must render as unicode, never raw backslashes."""
+    digest = Digest(subject="s", intro="", papers=[DigestPaper(index=0, reason="r")], outro="")
+    html = render_email(
+        digest,
+        originals=[_paper(0, authors=["Sergi Juli\\`a-Farr\\'e", "Author B"])],
+    )
+    assert "Julià-Farré" in html
+    assert "\\`" not in html and "\\'" not in html
+
+
+def test_legend_shown_with_intro_chinese():
+    """Badge legend appears under the intro so both scores are explained."""
+    digest = Digest(
+        subject="s", intro="今天的三篇都很相关。",
+        papers=[DigestPaper(index=0, reason="r")], outro="",
+    )
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "相关度" in html and "推荐度" in html
+    assert "语义检索分" in html
+
+
+def test_others_capped_with_overflow_hint():
+    """Long others lists are capped (default 15) with an explicit count —
+    never silently dropped, never a 47-row wall."""
+    digest = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")], outro="",
+        others=[{"index": i, "work_score": 6.0, "note": f"note {i}"} for i in range(1, 21)],
+    )
+    originals = [_paper(0, title="Picked Paper")] + [
+        _paper(i, title=f"Other Paper {i}", score=5.0) for i in range(1, 21)
+    ]
+    html = render_email(digest, originals=originals, language="Chinese")
+    assert "Other Paper 1" in html
+    assert "其余 5 篇" in html
+    assert "Other Paper 20" not in html
+    # opt-out still renders everything
+    html_full = render_email(digest, originals=originals, language="Chinese", max_others=None)
+    assert "Other Paper 20" in html_full
+    assert "其余" not in html_full

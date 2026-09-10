@@ -615,3 +615,26 @@ def test_others_capped_with_overflow_hint():
     html_full = render_email(digest, originals=originals, language="Chinese", max_others=None)
     assert "Other Paper 20" in html_full
     assert "其余" not in html_full
+
+
+def test_escaped_quotes_before_cjk_not_diaeresis():
+    """Regression 2026-09-10: agent wrote \\\"其余候选\\\" (escaped quotes);
+    the accent converter must not read \\\" as diaeresis (其̈/中̈)."""
+    digest = Digest(
+        subject="s", intro="i",
+        papers=[DigestPaper(index=0, reason="r")],
+        outro="已按相关性在\\\"其余候选\\\"中逐一标注。",
+    )
+    html = render_email(digest, originals=[_paper(0)], language="Chinese")
+    assert "其余候选" in html
+    assert "̈" not in html
+    # legit accents still convert
+    digest2 = Digest(
+        subject="s", intro="",
+        papers=[DigestPaper(index=0, reason="r")], outro="",
+    )
+    html2 = render_email(
+        digest2,
+        originals=[_paper(0, authors=["M\\\"uller", "Elisa Ercolessi"])],
+    )
+    assert "Müller" in html2

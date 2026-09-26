@@ -16,7 +16,7 @@ llm:
     base_url: https://opencode.ai/zen/go/v1
   generation_kwargs:
     max_tokens: 16384
-    model: deepseek-v4-flash
+    model: deepseek-v4.1-flash
   language: Chinese
   harness:
     enabled: true

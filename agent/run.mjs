@@ -39,7 +39,7 @@ import { Type } from "@earendil-works/pi-ai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENT_DIR = __dirname;
-const DEFAULT_MODEL = "deepseek-v4-flash";
+const DEFAULT_MODEL = "deepseek-v4.1-flash";
 
 function parseArgs(argv) {
   const args = { input: null, output: null };

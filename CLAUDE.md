@@ -4,12 +4,13 @@ Guidance for Claude Code when working in this repository.
 
 ## Project Overview
 
-Zotero-arXiv-Daily turns your Zotero library into a daily arXiv/bioRxiv/medRxiv
-digest email. The pipeline (Python) does the cheap deterministic work —
-fetching, embedding, reranking, filtering, safe HTML rendering; the editorial
-work — what to recommend, why, in what order — is done by an autonomous
-**Pi agent** (`agent/run.mjs` + `agent/ROLE.md`, the repo's innovation: a
-requirements-based role contract). Runs free on GitHub Actions.
+Zotero-arXiv-Daily turns your Zotero library into a daily
+arXiv/bioRxiv/medRxiv/chemRxiv digest email. The pipeline (Python) does the
+cheap deterministic work — fetching, embedding, reranking, filtering, safe
+HTML rendering; the editorial work — what to recommend, why, in what order —
+is done by an autonomous **Pi agent** (`agent/run.mjs` + `agent/ROLE.md`, the
+repo's innovation: a requirements-based role contract). Runs free on GitHub
+Actions.
 
 ## Commands
 
@@ -27,7 +28,9 @@ node --check agent/run.mjs              # syntax-check the Pi agent entry point
 1. **Fetch Zotero corpus** — pyzotero; empty abstracts fall back to the title
    (PDF imports are kept).
 2. **Filter corpus** — `include_path` / `ignore_path` glob patterns.
-3. **Retrieve new papers** — arXiv RSS (+weekend API fallback), bioRxiv/medRxiv.
+3. **Retrieve new papers** — arXiv RSS (+weekend API fallback), bioRxiv/medRxiv
+   REST API, chemRxiv via the Crossref REST API (`chemrxiv` source, no category
+   filter — the reranker selects).
 4. **Rerank** — embedding + optional BM25 hybrid vs corpus, recency-weighted
    (a *hint* for the agent, not the final ranking).
 5. **Filter** — min_score / keywords / sent-history dedupe / max_paper_num.
@@ -48,7 +51,8 @@ degrades gracefully to embedding order so the email always goes out.
 
 ## Plugin Systems
 
-- **Retrievers** (`retriever/`): `@register_retriever` + `get_retriever_cls`.
+- **Retrievers** (`retriever/`): `@register_retriever` + `get_retriever_cls`;
+  built-ins `arxiv` / `biorxiv` / `medrxiv` / `chemrxiv` (Crossref).
 - **Rerankers** (`reranker/`): `@register_reranker`; `local` (sentence-transformers)
   and `api` (OpenAI-compatible embeddings).
 - **Notifiers** (`notifier.py`): `@register_notifier`; built-ins `email` / `webhook`.
@@ -57,7 +61,9 @@ degrades gracefully to embedding order so the email always goes out.
 
 Hydra + OmegaConf; `config/default.yaml` composes `base.yaml` (schema+defaults)
 with `custom.yaml` (overrides, env-interpolated via `${oc.env:...}`).
-`llm.harness.engine`: `pi` (default) | `python`. See `config/base.yaml`.
+`llm.harness.engine`: `pi` (default) | `python`. `llm.api_mode`:
+`chat_completion` (default) | `response` — kept for upstream compatibility; the
+Pi engine talks to `llm.api.base_url` directly. See `config/base.yaml`.
 
 ## Data Classes
 

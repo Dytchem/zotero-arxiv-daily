@@ -14,6 +14,8 @@ source:
     category: null # The categories of target biorxiv papers. Find categories from [here](https://www.biorxiv.org/). Example: ["biochemistry","animal behavior and cognition"]
   medrxiv:
     category: null # The categories of target medrxiv papers. Find categories from [here](https://www.medrxiv.org/) Example: ["psychiatry and clinical psychology", "neurology"]
+  chemrxiv:
+    include_new_versions: false # Whether to include revised versions (v2, v3, ...) of previously posted chemrxiv preprints in addition to new first postings. chemrxiv has no category filter: all new preprints (a few dozen per day) are retrieved via Crossref and left to the reranker. Example: true
 
 email:
   sender: ??? # The email account of the SMTP server that sends you email. Example: abc@qq.com
@@ -27,8 +29,9 @@ llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx
     base_url: https://opencode.ai/zen/go/v1 # API URL of your LLM API (hardcoded, not a secret)
+  api_mode: chat_completion # The LLM API to use. Options: chat_completion or response.
   generation_kwargs:
-  # Arguments for the LLM API. See [here](https://platform.openai.com/docs/api-reference/chat/create) for more details.
+  # Arguments for the selected LLM API.
     max_tokens: 16384
     model: ??? # The model for the harness agent (e.g. gpt-5.6-luna on OpenRouter)
   language: English # Preferred language for the digest (intro / reasons / outro). Example: English
@@ -69,7 +72,7 @@ executor:
   cache_dir: .cache # Directory for run-state files (sent-paper history, embeddings cache). Example: .cache
   full_text_cache_max: 200 # Max entries in the on-disk full-text cache (full_texts.json). Example: 200
   notifiers: ['email'] # Delivery channels for the digest: 'email', 'webhook' (or both). Example: ['email', 'webhook']
-  source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv']
+  source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv','chemrxiv']
   reranker: local # The reranker to use. Example: 'local' or 'api'
   rerank_alpha: 0.7 # Hybrid rerank weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only. Example: 0.7
 

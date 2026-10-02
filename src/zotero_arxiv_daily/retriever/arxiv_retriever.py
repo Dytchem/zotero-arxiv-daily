@@ -22,6 +22,19 @@ DOWNLOAD_TIMEOUT = (10, 60)
 PDF_EXTRACT_TIMEOUT = 180
 TAR_EXTRACT_TIMEOUT = 180
 
+# Only *known* HTML tags are stripped: a bare "<" (math, e.g. "x < y") is left
+# untouched, which is why the tag names are enumerated instead of using "<[^>]+>".
+HTML_TAG_PATTERN = re.compile(
+    r"</?(?:p|a|span|div|b|i|strong|em|br|hr|h[1-6]|ul|ol|li|sub|sup|table|tr|td|th)\b(?:\s+[^>]*)?/?>",
+    flags=re.IGNORECASE,
+)
+# Token-based (not ".*?") so a bracketed id such as "arXiv:2609.22090v1 [cs.AI]"
+# is consumed as a whole and the regex cannot eat into the abstract body.
+ARXIV_HEADER_PATTERN = re.compile(
+    r"^(?:arxiv:\s*\S+(?:\s+\[[^\]]*\])?)?\s*(?:announce\s+type:\s*[\w-]+)?\s*(?:abstract:\s*)?",
+    flags=re.IGNORECASE,
+)
+
 
 def _read_retry_after(response) -> float | None:
     """Seconds to wait from a 429 Retry-After header, if present."""
@@ -124,19 +137,32 @@ def _extract_text_from_tar_worker(source_url: str, paper_id: str, paper_title: s
 def _parse_abstract(summary: str) -> str:
     """Extract the abstract from an arXiv Atom RSS entry summary.
 
-    The summary looks like: 'arXiv:2508.13426v1 Announce Type: new \\nAbstract: <text>'
+    The summary looks like: 'arXiv:2508.13426v1 Announce Type: new \\nAbstract: <text>',
+    but it can also arrive wrapped in HTML (``<p>``/``<br>``). Only known markup
+    tags are stripped so math inequalities such as ``x < y`` survive, and the
+    arXiv header is removed by a token-based regex anchored at the start — an
+    ``Abstract:`` occurring inside the body is therefore preserved.
     """
-    if "Abstract:" in summary:
-        return summary.split("Abstract:", 1)[1].strip()
-    return summary.strip()
+    cleaned = HTML_TAG_PATTERN.sub(" ", summary).strip()
+    cleaned = ARXIV_HEADER_PATTERN.sub("", cleaned).strip()
+    cleaned = re.sub(r"^abstract:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    return " ".join(cleaned.split())
 
 
 def _parse_authors(entry: Any) -> list[str]:
-    """arXiv Atom RSS lists all authors as one comma-joined name string."""
-    names = getattr(entry, "authors", None) or []
-    if not names:
-        return []
-    raw = names[0].get("name", "") if isinstance(names[0], dict) else str(names[0])
+    """arXiv Atom RSS lists all authors as one comma-joined name string.
+
+    Prefer ``entry.author`` (feedparser joins every ``<author><name>`` element
+    into a single comma-separated string); fall back to the ``authors`` list,
+    which some feedparser versions expose as one dict per author instead.
+    """
+    raw = getattr(entry, "author", "") or ""
+    if not raw:
+        names = getattr(entry, "authors", None) or []
+        raw = ", ".join(
+            name.get("name", "") if isinstance(name, dict) else getattr(name, "name", str(name))
+            for name in names
+        )
     return [a.strip() for a in raw.split(",") if a.strip()]
 
 
@@ -158,7 +184,8 @@ def _rss_entry_to_paper(entry: Any) -> dict[str, Any]:
             break
     return {
         "paper_id": paper_id,
-        "title": entry.title,
+        # arXiv RSS wraps long titles across lines; collapse the whitespace.
+        "title": " ".join((entry.get("title") or "").split()),
         "abstract": _parse_abstract(entry.get("summary", "")),
         "authors": _parse_authors(entry),
         "url": entry.get("link") or f"https://arxiv.org/abs/{paper_id}",

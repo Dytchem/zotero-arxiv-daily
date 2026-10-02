@@ -55,6 +55,37 @@ def test_parse_abstract_strips_rss_prefix():
     assert _parse_abstract(summary) == "A novel method for X."
 
 
+def test_parse_abstract_strips_html_wrapper_and_bracketed_id():
+    summary = (
+        "<p>arXiv:2609.22090v1 [cs.AI] Announce Type: new \n"
+        "Abstract: An LLM producing the response pattern.</p>"
+    )
+    assert _parse_abstract(summary) == "An LLM producing the response pattern."
+
+
+def test_parse_abstract_preserves_inner_abstract_word():
+    """Only the leading arXiv header is stripped; a body 'Abstract:' stays."""
+    summary = (
+        "<p>arXiv:2609.22090v1 Announce Type: new \n"
+        "Abstract: In this work, we introduce Abstract: A Benchmark for evaluation.</p>"
+    )
+    assert _parse_abstract(summary) == "In this work, we introduce Abstract: A Benchmark for evaluation."
+
+
+def test_parse_abstract_preserves_math_inequalities():
+    """A bare '<' is math, not markup, and must survive tag stripping."""
+    summary = (
+        "<p>arXiv:2609.22090v1 Announce Type: new \n"
+        "Abstract: We prove that x < y > 0 and 0 < a < b under condition C.</p>"
+    )
+    assert _parse_abstract(summary) == "We prove that x < y > 0 and 0 < a < b under condition C."
+
+
+def test_parse_abstract_handles_br_tag():
+    summary = "<p>arXiv:2609.22090v1 Announce Type: new<br>Abstract: This is the body after br tags.</p>"
+    assert _parse_abstract(summary) == "This is the body after br tags."
+
+
 def test_arxiv_retriever_fetches_each_category_feed(config, mock_feedparser, monkeypatch):
     """Each configured category is fetched as its own feed (avoids 1000-entry cap)."""
     import feedparser
@@ -130,6 +161,17 @@ def test_parse_abstract_without_prefix():
 def test_parse_authors_splits_comma_joined_names():
     entry = SimpleNamespace(authors=[{"name": "Alice A, Bob B, Carol C"}])
     assert _parse_authors(entry) == ["Alice A", "Bob B", "Carol C"]
+
+
+def test_parse_authors_prefers_author_string():
+    """feedparser joins every <author> into entry.author; use it when present."""
+    entry = SimpleNamespace(author="Alice, Bob, Charlie")
+    assert _parse_authors(entry) == ["Alice", "Bob", "Charlie"]
+
+
+def test_parse_authors_joins_author_dicts():
+    entry = SimpleNamespace(author="", authors=[{"name": "David"}, {"name": "Eva"}])
+    assert _parse_authors(entry) == ["David", "Eva"]
 
 
 def test_parse_authors_missing():

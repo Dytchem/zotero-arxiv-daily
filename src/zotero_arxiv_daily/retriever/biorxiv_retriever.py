@@ -1,3 +1,4 @@
+from datetime import datetime
 from time import sleep
 from typing import Any
 
@@ -37,9 +38,15 @@ class BiorxivRetriever(BaseRetriever):
         if len(collection) == 0:
             logger.warning(f"No paper found. API Message: {result.get('messages')}")
             return []
-        all_dates = {c['date'] for c in collection}
-        latest_date = sorted(all_dates)[-1]
-        collection = [c for c in collection if c['date'] == latest_date]
+        # Parse the date strings before comparing: bioRxiv occasionally emits
+        # unpadded dates ("2026-6-30"), and a plain string sort would rank those
+        # above padded ones, selecting the wrong "latest" batch.
+        dated_collection = [
+            (datetime.strptime(c['date'], "%Y-%m-%d").date(), c)
+            for c in collection
+        ]
+        latest_date = max(date for date, _ in dated_collection)
+        collection = [c for date, c in dated_collection if date == latest_date]
         categories = [c.lower() for c in self.retriever_config.category]
         collection = [c for c in collection if c['category'] in categories]
         if self.config.executor.debug:

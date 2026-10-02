@@ -5,7 +5,7 @@
 <h1 align="center">Zotero-arXiv-Daily</h1>
 
 <p align="center">
-  <em>Your AI research librarian — reads your Zotero library, scans arXiv/bioRxiv/medRxiv daily, and emails a digest with real editorial judgement.</em>
+  <em>Your AI research librarian — reads your Zotero library, scans arXiv/bioRxiv/medRxiv/chemRxiv daily, and emails a digest with real editorial judgement.</em>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 Every morning a GitHub Actions workflow (free, no server of yours):
 
 1. **Learns your taste** from your Zotero library — topics, methods, and the *quality bar* you actually read at.
-2. **Pulls the newest papers** from arXiv, bioRxiv and medRxiv.
+2. **Pulls the newest papers** from arXiv, bioRxiv, medRxiv and chemRxiv.
 3. **Shortlists candidates** with fast deterministic math (embeddings + BM25 + recency).
 4. **Lets an autonomous agent decide** — it browses the *full pool* of today's papers (not just the pre-filtered list), fetches full texts itself, reads them (delegating long papers to a sub-agent), verifies provenance online, and scores each paper's **Recommendation** (0–10).
 5. **Emails you a polished HTML digest**: intro, expert-ordered cards with **Relevance** and **Recommendation** chips, and a full "other candidates" section — every candidate scored, nothing silently dropped, **papers the agent actually read and annotated listed first**.
@@ -44,6 +44,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
 - **Graceful degradation** — Pi failure → Python harness → embedding-order digest. The email always goes out.
 - **Provider unbundling** — the LLM (`LLM_API_KEY` → `https://opencode.ai/zen/go/v1`) and reranker (`RERANKER_API_KEY` → `https://openrouter.ai/api/v1`) use **independent secrets** with the base URLs hardcoded in config; nothing shares a key between them.
 - **Gap-free lookback, sent-history dedupe, multi-source, multi-recipient, webhook notifier, bilingual (EN/ZH).**
+- **Multi-source retrieval** — arXiv (RSS metadata read directly, no rate-limited query API), bioRxiv/medRxiv REST API, and chemRxiv via the Crossref REST API (`chemrxiv` source; chemRxiv has no category filter, so the reranker selects).
 
 ## Quick start
 

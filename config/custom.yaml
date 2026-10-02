@@ -14,6 +14,7 @@ llm:
   api:
     key: ${oc.env:LLM_API_KEY}
     base_url: https://opencode.ai/zen/go/v1
+  api_mode: chat_completion # Upstream-compatible knob (chat_completion | response); the Pi agent uses llm.api.* directly
   generation_kwargs:
     max_tokens: 16384
     model: deepseek-v4.1-flash

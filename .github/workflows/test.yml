@@ -9,6 +9,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # SEC-1: the Pi agent runs with bash/read in the repo root; never
+          # leave GITHUB_TOKEN behind in .git/config.
+          persist-credentials: false
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v7.1.4

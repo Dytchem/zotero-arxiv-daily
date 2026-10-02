@@ -465,15 +465,25 @@ def test_validate_config_missing_email_sender(config):
 
 
 def test_validate_config_missing_reranker_api_model(config):
-    import pytest
+    # A missing reranker config degrades (warn + unscored order) instead of
+    # failing the whole run: the reranker is optional and the pipeline already
+    # has a degradation chain for it.
+    from loguru import logger
     from omegaconf import open_dict
 
     from zotero_arxiv_daily.executor import Executor
 
     with open_dict(config.reranker.api):
         config.reranker.api.model = None
-    with pytest.raises(ValueError, match="reranker.api.model"):
-        Executor(config)
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="WARNING", format="{message}")
+    try:
+        Executor(config)  # must not raise
+    finally:
+        logger.remove(sink_id)
+    text = "\n".join(str(m) for m in messages)
+    assert "reranker.api.model" in text
+    assert "degrade" in text
 
 
 def test_dedupe_papers_by_url():
@@ -849,58 +859,11 @@ def test_agent_digest_pi_returns_none_when_node_fails(config, monkeypatch):
     assert len(digest.papers) == 2
 
 
-def test_collect_shown_urls_records_picked_index_zero(config):
-    """Regression: index=0 is a VALID pick and must be recorded in sent-history
-    (the old `(p.index or -1)` falsy trap silently dropped the top pick)."""
-    from tests.canned_responses import make_sample_paper
-    from zotero_arxiv_daily.executor import Executor
-    from zotero_arxiv_daily.harness import Digest, DigestPaper
-
-    executor = Executor(config)
-    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(3)]
-    digest = Digest(
-        subject="s", intro="", outro="",
-        papers=[DigestPaper(index=0, reason="top pick")],
-    )
-    shown = executor._collect_shown_urls(digest, originals, candidate_count=3, ranked=[])
-    assert originals[0].url in shown
+# NOTE: sent-history "actually shown URL" coverage moved to
+# tests/test_construct_email.py, next to render_email_with_shown (the renderer
+# now owns the shown set; executor just records it).
 
 
-def test_collect_shown_urls_covers_all_unpicked_candidates(config):
-    """Regression: with a PARTIAL others list, every unpicked candidate shown
-    in the email's others block must still be recorded (partial coverage used
-    to leak papers into tomorrow's repeat)."""
-    from tests.canned_responses import make_sample_paper
-    from zotero_arxiv_daily.executor import Executor
-    from zotero_arxiv_daily.harness import Digest, DigestPaper
-
-    executor = Executor(config)
-    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(4)]
-    digest = Digest(
-        subject="s", intro="", outro="",
-        papers=[DigestPaper(index=0, reason="picked")],
-        # agent only scored one unpicked candidate — the other two are still rendered
-        others=[{"index": 1, "work_score": 6.0}],
-    )
-    shown = executor._collect_shown_urls(digest, originals, candidate_count=4, ranked=[])
-    assert {originals[i].url for i in range(4)} <= shown
-
-
-def test_collect_shown_urls_includes_rescued_pool_papers(config):
-    """A filtered-out pool paper the agent scored in others is shown → recorded."""
-    from tests.canned_responses import make_sample_paper
-    from zotero_arxiv_daily.executor import Executor
-    from zotero_arxiv_daily.harness import Digest, DigestPaper
-
-    executor = Executor(config)
-    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(5)]
-    digest = Digest(
-        subject="s", intro="", outro="",
-        papers=[DigestPaper(index=0, reason="picked")],
-        others=[{"index": 4, "work_score": 5.0}],  # 4 >= candidate_count=2: rescued
-    )
-    shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
-    assert originals[4].url in shown
 
 
 def test_run_survives_reranker_failure(config, monkeypatch, tmp_path):
@@ -964,26 +927,6 @@ def test_digest_from_args_does_not_render_none_strings(config):
     assert digest.outro == ""
 
 
-def test_collect_shown_urls_empty_papers_still_records_rescued(config):
-    """Regression (M2 round-2): a digest with an empty papers list (valid:
-    nothing worth recommending) still shows the others block — rescued pool
-    papers must be recorded too, or they are re-sent tomorrow."""
-    from tests.canned_responses import make_sample_paper
-    from zotero_arxiv_daily.executor import Executor
-    from zotero_arxiv_daily.harness import Digest
-
-    executor = Executor(config)
-    originals = [make_sample_paper(title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(4)]
-    digest = Digest(
-        subject="", intro="Nothing worth recommending.", outro="",
-        papers=[],  # empty papers list
-        others=[{"index": 3, "work_score": 5.0}],  # rescued pool paper (3 >= candidate_count=2)
-    )
-    shown = executor._collect_shown_urls(digest, originals, candidate_count=2, ranked=[])
-    # all candidates (0,1) + rescued (3)
-    assert {originals[i].url for i in (0, 1, 3)} <= shown
-
-
 def test_agent_digest_pi_success_sets_pool_and_candidate_count(config, tmp_path, monkeypatch):
     """Pi success path: digest is parsed, _pi_pool/_pi_candidate_count track
     the (top_k-capped) index space, and the payload carries candidate_count +
@@ -1021,18 +964,42 @@ def test_agent_digest_pi_success_sets_pool_and_candidate_count(config, tmp_path,
 
     sent_payload = {}
 
-    def _fake_subprocess_run(cmd, env=None, capture_output=True, text=True, timeout=None):
-        in_path = _Path(cmd[cmd.index("--input") + 1])
-        out_path = _Path(cmd[cmd.index("--output") + 1])
-        sent_payload["payload"] = _json.loads(in_path.read_text())
-        out_path.write_text(_json.dumps({
-            "subject": "", "intro": "hello", "outro": "",
-            "papers": [{"index": 0, "reason": "r", "work_score": 7}],
-            "others": [],
-        }))
-        return SimpleNamespace(returncode=0, stderr="", stdout="")
+    class _FakePopen:
+        """Mimics the small slice of subprocess.Popen the Pi runner uses.
 
-    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+        Records the env it was handed (SEC-1 regression guard) and writes a
+        digest + a log line so the bounded-log-tail path is exercised too.
+        """
+
+        def __init__(self, cmd, env=None, stdout=None, stderr=None, start_new_session=False, **kwargs):
+            sent_payload["env"] = env
+            sent_payload["start_new_session"] = start_new_session
+            sent_payload["cmd"] = cmd
+            in_path = _Path(cmd[cmd.index("--input") + 1])
+            out_path = _Path(cmd[cmd.index("--output") + 1])
+            sent_payload["payload"] = _json.loads(in_path.read_text())
+            out_path.write_text(_json.dumps({
+                "subject": "", "intro": "hello", "outro": "",
+                "papers": [{"index": 0, "reason": "r", "work_score": 7}],
+                "others": [],
+            }))
+            if stdout is not None:
+                stdout.write(b"pi agent tool log line\n")
+            self.returncode = 0
+            self.pid = 4242
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                self.returncode = 0
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
 
     executor = Executor(config)
     candidates = [make_sample_paper(title=f"C{i}", url=f"https://arxiv.org/abs/c{i}") for i in range(3)]
@@ -1050,9 +1017,18 @@ def test_agent_digest_pi_success_sets_pool_and_candidate_count(config, tmp_path,
     assert sent_payload["payload"]["candidate_count"] == 2
     assert sent_payload["payload"]["min_inspections"] == 3
     assert sent_payload["payload"]["thinking_level"] == "max"
-    # minimal env: workflow secrets must NOT leak into the Pi subprocess
-    fake_env = sent_payload["payload"]  # placeholder; env assertions below
-    assert "SENDER_PASSWORD" not in fake_env
+    # RES-2: the child must run in its own session so a timeout can killpg it.
+    assert sent_payload["start_new_session"] is True
+    # SEC-1: minimal env — the agent gets what it needs and NOTHING else.
+    env = sent_payload["env"]
+    assert env is not None
+    assert {"PATH", "HOME", "LANG", "LLM_API_KEY", "OPENAI_API_KEY", "OPENAI_API_BASE", "OPENCODE_SESSION_ID"} <= set(env)
+    assert env["LLM_API_KEY"] == "sk-fake"
+    for leaked in (
+        "ZOTERO_KEY", "ZOTERO_ID", "SENDER_PASSWORD", "SENDER", "RECEIVER",
+        "RERANKER_API_KEY", "CUSTOM_CONFIG", "GITHUB_TOKEN",
+    ):
+        assert leaked not in env, f"{leaked} must not be forwarded to the Pi subprocess"
 
 
 def test_email_sender_all_modes_fail_raises_clear_error(config, monkeypatch):
@@ -1070,3 +1046,122 @@ def test_email_sender_all_modes_fail_raises_clear_error(config, monkeypatch):
     import pytest
     with pytest.raises(ConnectionError, match="SMTP connection failed"):
         send_email(config, "<html></html>")
+
+
+# ---------------------------------------------------------------------------
+# Pi subprocess hardening helpers (SEC-1 / RES-1 / RES-2)
+# ---------------------------------------------------------------------------
+
+
+def test_read_log_tail_is_bounded_and_flags_truncation(tmp_path):
+    """RES-1: the agent log is read back with a hard cap (bounded memory)."""
+    from zotero_arxiv_daily.executor import PI_LOG_READ_BYTES, _read_log_tail
+
+    log = tmp_path / "pi_agent.log"
+    log.write_bytes(b"a" * (PI_LOG_READ_BYTES + 4096) + b"TAIL-MARKER")
+    text, truncated = _read_log_tail(log)
+    assert truncated is True
+    assert len(text) <= PI_LOG_READ_BYTES + len("TAIL-MARKER")
+    assert text.endswith("TAIL-MARKER")  # only the tail is kept
+
+
+def test_read_log_tail_small_file_not_truncated(tmp_path):
+    from zotero_arxiv_daily.executor import _read_log_tail
+
+    log = tmp_path / "pi_agent.log"
+    log.write_bytes(b"hello")
+    text, truncated = _read_log_tail(log)
+    assert (text, truncated) == ("hello", False)
+
+
+def test_read_log_tail_missing_file():
+    from pathlib import Path
+
+    from zotero_arxiv_daily.executor import _read_log_tail
+
+    assert _read_log_tail(Path("/nonexistent/pi_agent.log")) == ("", False)
+
+
+def test_kill_process_group_kills_the_whole_tree():
+    """RES-2: a timed-out Pi agent must not leave its process group running."""
+    import os
+    import subprocess
+    import sys
+
+    import pytest
+
+    from zotero_arxiv_daily.executor import _kill_process_group
+
+    if os.name != "posix":
+        pytest.skip("process groups (killpg) are POSIX-only")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True,
+    )
+    try:
+        _kill_process_group(proc)
+        assert proc.wait(timeout=5) != 0  # SIGKILLed
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(5)
+
+
+def test_kill_process_group_is_a_noop_for_exited_child():
+    import subprocess
+    import sys
+
+    from zotero_arxiv_daily.executor import _kill_process_group
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    _kill_process_group(proc)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# reranker default vs optional extra (ENG-2)
+# ---------------------------------------------------------------------------
+
+
+def test_local_reranker_missing_extra_warns_but_continues(config, monkeypatch):
+    """ENG-2: `reranker: local` without the optional 'local-reranker' extra
+    used to degrade silently; it must log a loud, actionable warning yet still
+    start (a degraded email beats no email at all)."""
+    from omegaconf import open_dict
+
+    from zotero_arxiv_daily.executor import Executor, logger
+
+    with open_dict(config.executor):
+        config.executor.reranker = "local"
+    monkeypatch.setattr("zotero_arxiv_daily.executor.importlib.util.find_spec", lambda name: None)
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        Executor(config)  # must not raise
+    finally:
+        logger.remove(sink_id)
+
+    assert any("local-reranker" in message for message in messages), messages
+
+
+def test_cap_log_file_shrinks_oversized_log(tmp_path):
+    """RES-1 follow-up: the on-disk agent log (inside .cache, which the workflow
+    caches) is capped too, so a runaway agent cannot upload gigabytes."""
+    from zotero_arxiv_daily.executor import PI_LOG_READ_BYTES, _cap_log_file
+
+    log = tmp_path / "pi_agent.log"
+    log.write_bytes(b"x" * (PI_LOG_READ_BYTES + 10_000) + b"TAIL")
+    _cap_log_file(log)
+    assert log.stat().st_size <= PI_LOG_READ_BYTES
+    assert log.read_bytes().endswith(b"TAIL")
+
+
+def test_cap_log_file_leaves_small_log_alone(tmp_path):
+    from zotero_arxiv_daily.executor import _cap_log_file
+
+    log = tmp_path / "pi_agent.log"
+    log.write_bytes(b"small")
+    _cap_log_file(log)
+    assert log.read_bytes() == b"small"

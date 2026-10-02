@@ -20,6 +20,11 @@ jobs:
         with:
           repository: ${{ vars.REPOSITORY }}
           ref: ${{ vars.REF }}
+          # SEC-1: never persist GITHUB_TOKEN into .git/config. The Pi coding
+          # agent runs with cwd = repo root and keeps bash/read access, so a
+          # prompt-injected paper could otherwise read the token from
+          # .git/config and push to the repository.
+          persist-credentials: false
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v7

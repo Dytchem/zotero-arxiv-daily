@@ -391,17 +391,29 @@ def _legend_html(language: str = "English") -> str:
     )
 
 
-def _preheader(digest: Digest, language: str) -> str:
-    """Inbox-preview text: a short, skimmable teaser of the digest."""
+def _preheader(digest: Digest, language: str, *, has_others: bool = False, failures: list[str] | None = None) -> str:
+    """Inbox-preview text: a short, skimmable teaser of the digest.
+
+    ``has_others`` / ``failures`` keep the preview consistent with the body
+    (BUG-2/BUG-7): an empty digest that still lists other candidates must not
+    claim "no papers", and a fetch failure must be named instead of being
+    misread as a quiet day.
+    """
+    chinese = language.lower().startswith("chinese")
     n = len(digest.papers)
     if n == 0:
-        if language.lower().startswith("chinese"):
+        if failures:
+            names = "、".join(failures) if chinese else ", ".join(failures)
+            prefix = "抓取失败：" if chinese else "Retrieval failed: "
+            return _safe(prefix + names)
+        if has_others:
+            if chinese:
+                return "今日未选出精选 · 其余候选见正文"
+            return "No picks today · other candidates inside"
+        if chinese:
             return "今日暂无新论文 · 休息一下，明天再见"
         return "No new papers today · take a rest"
-    if language.lower().startswith("chinese"):
-        head = f"今日精选 {n} 篇论文"
-    else:
-        head = f"{n} paper{'s' if n != 1 else ''} recommended today"
+    head = f"今日精选 {n} 篇论文" if chinese else f"{n} paper{'s' if n != 1 else ''} recommended today"
     # Use the intro's first sentence (or the subject) as the teaser — never
     # stitch together per-paper fragments.
     intro = (digest.intro or "").strip()
@@ -419,7 +431,7 @@ def _footer_html(language: str) -> str:
     return "To unsubscribe, remove your email in your GitHub Actions settings."
 
 
-def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None, max_others: int | None = 15) -> str:
+def _others_block_html(papers: list[Paper], language: str = "English", others_summary: str = "", others_map: dict[int, dict] | None = None, indices: list[int] | None = None, max_others: int | None = 15) -> tuple[str, list[int]]:
     """Compact list of candidates the agent did not pick (bottom of the email).
 
     Each entry shows the same Relevance + Recommendation badges as the picked cards
@@ -434,6 +446,11 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
     ``max_others`` caps the list (default 15): the caller sorts annotated
     entries first, so the cap keeps the most informative ones. Overflow is
     disclosed with an explicit count line — never silently dropped.
+
+    Returns ``(html, rendered_indices)`` where ``rendered_indices`` are the
+    original indices actually emitted (post-cap) — the caller records exactly
+    those in the sent-history so an entry hidden by the cap is NOT marked as
+    sent and will surface again on a later day (BUG-1).
     """
     heading = "其他候选" if language.lower().startswith("chinese") else "Other candidates"
     others_map = others_map or {}
@@ -443,6 +460,7 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
         hidden = len(papers) - max_others
         papers = papers[:max_others]
         indices = indices[:max_others] if indices else None
+    rendered_indices = list(indices) if indices else list(range(len(papers)))
     rows = ""
     for i, p in enumerate(papers):
         orig_index = indices[i] if indices else i
@@ -485,23 +503,79 @@ def _others_block_html(papers: list[Paper], language: str = "English", others_su
             f'<div style="font-size:12px;color:#9ca3af;margin-top:6px;">'
             f'{_safe(overflow_text)}</div>'
         )
-    return (
+    html = (
         f'<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb;">'
         f'<div style="font-size:13px;font-weight:700;color:#6b7280;margin-bottom:4px;">{heading}</div>'
         f'{summary_html}'
         f'{rows}{overflow_html}</div>'
+    )
+    return html, rendered_indices
+
+
+def _failures_note_html(failures: list[str], language: str = "English") -> str:
+    """Escaped "retrieval failed" note shared by the empty-email paths.
+
+    ``failures`` values come from config/``run()`` (source names), but they are
+    still escaped here — this note is interpolated into HTML and used to be the
+    one unescaped interpolation in the render layer.
+    """
+    if language.lower().startswith("chinese"):
+        names = _safe("、".join(failures))
+        text = f"抓取失败：<strong>{names}</strong>（网络或限流问题）。请检查 GitHub Actions 运行日志。"
+    else:
+        names = _safe(", ".join(failures))
+        text = f"Retrieval failed for: <strong>{names}</strong> (network or rate-limit issue). Check the GitHub Actions run log."
+    return f'<div style="font-size:14px;color:#6b7280;margin-top:8px;line-height:1.6;">{text}</div>'
+
+
+def _no_picks_html(language: str = "English") -> str:
+    """Neutral block shown when the agent picked nothing BUT candidates exist.
+
+    Using :func:`get_empty_html` there would claim "no papers today" directly
+    above a list of papers — the contradiction reported as BUG-7.
+    """
+    if language.lower().startswith("chinese"):
+        return (
+            '<div style="font-size:14px;color:#6b7280;line-height:1.7;padding:4px 0 0;">'
+            "今日未选出精选论文，以下为其余候选，供你自行浏览。</div>"
+        )
+    return (
+        '<div style="font-size:14px;color:#6b7280;line-height:1.7;padding:4px 0 0;">'
+        "No picks today — the remaining candidates are listed below for your own browsing.</div>"
     )
 
 
 def render_email(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None, failures: list[str] | None = None, max_others: int | None = 15) -> str:
     """Render a Digest (or a plain fallback list) to HTML email.
 
+    Thin wrapper over :func:`render_email_with_shown`, kept for callers (and
+    tests) that only need the HTML string.
+    """
+    return render_email_with_shown(
+        digest,
+        originals=originals,
+        language=language,
+        candidate_count=candidate_count,
+        failures=failures,
+        max_others=max_others,
+    )[0]
+
+
+def render_email_with_shown(digest: Digest | None, originals: list[Paper] | None = None, language: str = "English", candidate_count: int | None = None, failures: list[str] | None = None, max_others: int | None = 15) -> tuple[str, set[str]]:
+    """Render a Digest (or a plain fallback list) to HTML email.
+
+    Returns ``(html, shown_urls)``: the HTML plus the URLs of the papers that
+    were ACTUALLY rendered into it. ``executor.run()`` records exactly that set
+    in the sent-history, so a candidate hidden by ``max_others`` is not marked
+    as already-sent and still surfaces on a later day (BUG-1).
+
     ``digest`` is the agent's structured output; when it is None we render the
     ``originals`` list as simple embedding-ordered cards (the graceful fallback).
 
-    ``failures`` (optional) names sources that failed to fetch — shown in the
-    empty-fallback email so a rate-limited arXiv run is not mistaken for a
-    quiet "no papers" day.
+    ``failures`` (optional) names sources that failed to fetch. It is surfaced
+    on BOTH empty paths — the ``digest is None`` fallback AND an empty digest
+    (the main path always gets a fallback Digest, so a rate-limited arXiv run
+    used to look like a quiet "no papers" day).
 
     ``originals`` carries the FULL paper pool the digest's indices refer to
     (candidates first, filtered-out papers after). ``candidate_count`` tells
@@ -512,10 +586,15 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     callers), everything in ``originals`` is treated as a candidate.
     """
     if digest is None:
-        return render_fallback(originals or [], language=language, failures=failures)
+        pools = originals or []
+        html = render_fallback(pools, language=language, failures=failures)
+        # render_fallback renders every paper it is given.
+        return html, {p.url for p in pools if p.url}
     originals = originals or []
     if candidate_count is None:
         candidate_count = len(originals)
+    chinese = language.lower().startswith("chinese")
+    shown: set[str] = set()
 
     title = _safe(_strip_markdown(_mathify(digest.subject))) or "Daily paper digest"
     today = _today_str()
@@ -525,16 +604,17 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
     # the title means the date is already there.
     subject_has_date = bool(re.search(r"\d{4}", title))
     n = len(digest.papers)
-    # Empty digest: don't show "精选 0 篇论文" + "以下是今天..." which feels like a broken list
+    failure_note_html = _failures_note_html(failures, language) if failures else ""
+    # Empty digest: don't show "精选 0 篇论文" + "以下是今天..." which feels like a
+    # broken list. The copy is finalised AFTER the others block is built: when
+    # candidates are still listed below, the summary must not say "no papers"
+    # (BUG-7) — hence the deferred ``summary = None`` sentinel.
     if n == 0:
-        if language.lower().startswith("chinese"):
-            summary = "今日暂无更新 — 休息一下 ☕"
-        else:
-            summary = "No new papers today — take a rest ☕"
+        summary: str | None = None
         intro = ""
         outro = ""
     else:
-        if language.lower().startswith("chinese"):
+        if chinese:
             summary = (f"{today} · " if not subject_has_date else "") + f"精选 {len(digest.papers)} 篇论文"
         else:
             n_label = f"{len(digest.papers)} paper{'s' if len(digest.papers) != 1 else ''} recommended"
@@ -574,6 +654,9 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 language=language,
             )
             selected_indices.add(dp.index)
+            if paper and paper.url:
+                # Shown as a picked card → part of the sent-history (BUG-1).
+                shown.add(paper.url)
     else:
         cards = get_empty_html(language)
 
@@ -627,7 +710,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                     "work_score": entry.get("work_score"),
                     "note": entry.get("note", ""),
                 }
-            others_html = _others_block_html(
+            others_html, rendered_others = _others_block_html(
                 others,
                 language,
                 others_summary=digest.others_summary or "",
@@ -635,6 +718,22 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
                 indices=others_indices,
                 max_others=max_others,
             )
+            # Record exactly the entries the block emitted (post max_others
+            # cap) — the hidden ones stay eligible for a later email (BUG-1).
+            shown.update(
+                originals[i].url for i in rendered_others
+                if 0 <= i < len(originals) and originals[i].url
+            )
+
+    if summary is None:
+        # Deferred empty-digest copy: don't contradict the body (BUG-7).
+        if others_html:
+            summary = "今日未选出精选，以下为其余候选" if chinese else "No picks today — other candidates below"
+        else:
+            summary = "今日暂无更新 — 休息一下 ☕" if chinese else "No new papers today — take a rest ☕"
+        if others_html:
+            # Replace the "No Papers Today" block: papers ARE listed below.
+            cards = _no_picks_html(language)
 
     intro_html = ""
     if intro:
@@ -643,6 +742,13 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
             # Badge legend directly under the intro: readers meet both scores
             # on the first card, so explain them once up front.
             intro_html += _legend_html(language)
+    if failure_note_html and n == 0:
+        # BUG-2: the main path ALWAYS gets a Digest (the fallback digest), so
+        # the old `digest is None` branch was unreachable and a rate-limited
+        # arXiv run was indistinguishable from a quiet "no papers" day.
+        # Surface the failure reason on the real path whenever no paper was
+        # selected.
+        intro_html += failure_note_html
     content = cards + others_html
     # One-pass token substitution: replaces every template token in a single
     # scan of the framework, so LLM-authored text that happens to contain a
@@ -652,7 +758,9 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         lambda m: {
             "__TITLE__": title,
             "__SUMMARY__": summary,
-            "__PREHEADER__": _preheader(digest, language),
+            "__PREHEADER__": _preheader(
+                digest, language, has_others=bool(others_html), failures=failures
+            ),
             "__INTRO__": intro_html,
             "__OUTRO__": f'<div style="font-size:14px;color:#6b7280;margin-top:20px;line-height:1.6;">{outro}</div>' if outro else "",
             "__FOOTER__": _footer_html(language),
@@ -660,7 +768,7 @@ def render_email(digest: Digest | None, originals: list[Paper] | None = None, la
         }[m.group(0)],
         framework,
     )
-    return html
+    return html, shown
 
 
 def render_fallback(papers: list[Paper], language: str = "English", failures: list[str] | None = None) -> str:
@@ -673,20 +781,10 @@ def render_fallback(papers: list[Paper], language: str = "English", failures: li
     if not papers:
         body = get_empty_html(language)
         if failures:
-            if language.lower().startswith("chinese"):
-                note = (
-                    "抓取失败：<strong>" + "、".join(failures) + "</strong>"
-                    "（网络或限流问题）。请检查 GitHub Actions 运行日志。"
-                )
-            else:
-                note = (
-                    "Retrieval failed for: <strong>" + ", ".join(failures) + "</strong>"
-                    " (network or rate-limit issue). Check the GitHub Actions run log."
-                )
             body = (
                 f'<div style="text-align:center;padding:40px 20px;">'
                 f'<div style="font-size:20px;font-weight:700;color:#111827;">No Papers Today. Take a Rest!</div>'
-                f'<div style="font-size:14px;color:#6b7280;margin-top:8px;">{note}</div>'
+                f'{_failures_note_html(failures, language)}'
                 f'</div>'
             )
     else:

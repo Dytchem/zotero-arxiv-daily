@@ -226,6 +226,45 @@ def test_extract_tex_with_input_resolution(make_tar):
     assert "This is the introduction." in result["all"]
 
 
+def test_extract_tex_with_include_resolution(make_tar):
+    """BUG-5 regression: \\include{} was collected but never replaced, so whole
+    chapters silently vanished and the literal \\include{sec2} stayed in the
+    "full text"."""
+    path = make_tar({
+        "main.tex": "\\begin{document}\n\\input{sec1}\n\\include{sec2}\n\\end{document}",
+        "main.bbl": "",
+        "sec1.tex": "Chapter one body.",
+        "sec2.tex": "Chapter two body.",
+    })
+    result = extract_tex_code_from_tar(path, "test-paper")
+    assert "Chapter one body." in result["all"]
+    assert "Chapter two body." in result["all"]
+    assert "\\include{sec2}" not in result["all"]
+    assert "\\input{sec1}" not in result["all"]
+
+
+def test_extract_tex_include_with_explicit_extension(make_tar):
+    path = make_tar({
+        "main.tex": "\\begin{document}\n\\include{sec2.tex}\n\\end{document}",
+        "main.bbl": "",
+        "sec2.tex": "Chapter two body.",
+    })
+    result = extract_tex_code_from_tar(path, "test-paper")
+    assert "Chapter two body." in result["all"]
+    assert "\\include" not in result["all"]
+
+
+def test_extract_tex_missing_include_becomes_empty(make_tar):
+    """A referenced file that is not in the tar is replaced by nothing (same as
+    the previous \\input behaviour) — never left as a literal command."""
+    path = make_tar({
+        "main.tex": "\\begin{document}\n\\include{ghost}\n\\end{document}",
+        "main.bbl": "",
+    })
+    result = extract_tex_code_from_tar(path, "test-paper")
+    assert "\\include{ghost}" not in result["all"]
+
+
 def test_extract_tex_no_tex_files(make_tar):
     path = make_tar({"readme.md": "# Hello"})
     result = extract_tex_code_from_tar(path, "test-paper")

@@ -21,6 +21,16 @@ T = TypeVar("T")
 DOWNLOAD_TIMEOUT = (10, 60)
 PDF_EXTRACT_TIMEOUT = 180
 TAR_EXTRACT_TIMEOUT = 180
+# RES-4: never sleep longer than this between feed retries. A hostile/broken
+# ``Retry-After: 86400`` must not park the whole job until its 24h timeout.
+MAX_BACKOFF_SECONDS = 60.0
+
+
+def _is_retryable_status(status: int | None) -> bool:
+    """408/429 and every 5xx are transient; other 4xx are permanent."""
+    if status is None:
+        return True  # unknown (e.g. the exception carried no response): assume transient
+    return status in (408, 429) or status >= 500
 
 # Only *known* HTML tags are stripped: a bare "<" (math, e.g. "x < y") is left
 # untouched, which is why the tag names are enumerated instead of using "<[^>]+>".
@@ -150,19 +160,33 @@ def _parse_abstract(summary: str) -> str:
 
 
 def _parse_authors(entry: Any) -> list[str]:
-    """arXiv Atom RSS lists all authors as one comma-joined name string.
+    """Return EVERY author of an entry, for both arXiv feed shapes.
 
-    Prefer ``entry.author`` (feedparser joins every ``<author><name>`` element
-    into a single comma-separated string); fall back to the ``authors`` list,
-    which some feedparser versions expose as one dict per author instead.
+    Two shapes must both work:
+      * RSS atom (``rss.arxiv.org/atom/*``) puts the whole author list in a
+        single ``dc:creator`` element, which feedparser exposes as ONE element
+        joined with commas: ``entry.author == entry.authors[0]["name"] ==
+        "A, B, C"``.
+      * the export API (``export.arxiv.org/api/query``, the weekend fallback)
+        emits one ``<author><name>`` element per author, so ``entry.authors``
+        has N entries — while ``entry.author`` only holds the LAST one
+        (feedparser overwrites it per element). Reading ``entry.author`` first
+        therefore silently dropped every author but the last on that path.
+
+    Strategy: when ``authors`` holds more than one element, each element IS one
+    author (never comma-split — the API format can be "Lastname, Firstname");
+    with a single element, split it on commas (RSS form).
     """
-    raw = getattr(entry, "author", "") or ""
-    if not raw:
-        names = getattr(entry, "authors", None) or []
-        raw = ", ".join(
-            name.get("name", "") if isinstance(name, dict) else getattr(name, "name", str(name))
-            for name in names
-        )
+    names = getattr(entry, "authors", None) or []
+    collected: list[str] = []
+    for name in names:
+        if isinstance(name, dict):
+            collected.append(name.get("name", "") or "")
+        else:
+            collected.append(getattr(name, "name", str(name)) or "")
+    if len(collected) > 1:
+        return [a.strip() for a in collected if a.strip()]
+    raw = collected[0] if collected else (getattr(entry, "author", "") or "")
     return [a.strip() for a in raw.split(",") if a.strip()]
 
 
@@ -345,8 +369,24 @@ class ArxivRetriever(BaseRetriever):
             except Exception as exc:
                 last_exc = exc
                 retry_after = _read_retry_after(response)
+                # RES-4: a permanent 4xx (404/406/403/400/...) will never
+                # succeed on retry. Raise immediately so run()'s per-source
+                # isolation records it — instead of burning 4 requests and
+                # ~30s of sleep per category.
+                if (
+                    response is not None
+                    and response.status_code >= 400
+                    and not _is_retryable_status(response.status_code)
+                ):
+                    logger.error(
+                        f"arXiv feed fetch failed for {category} with permanent "
+                        f"HTTP {response.status_code}: {exc}"
+                    )
+                    raise
                 if attempt < attempts:
                     delay = retry_after if retry_after is not None else base_delay * attempt
+                    # P3-24/RES-4: clamp negative and absurd Retry-After values.
+                    delay = max(0.0, min(delay, MAX_BACKOFF_SECONDS))
                     logger.warning(
                         f"arXiv feed fetch failed for {category} (attempt {attempt}/{attempts}): "
                         f"{exc}; retrying in {delay}s"

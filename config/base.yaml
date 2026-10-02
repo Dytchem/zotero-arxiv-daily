@@ -73,7 +73,7 @@ executor:
   full_text_cache_max: 200 # Max entries in the on-disk full-text cache (full_texts.json). Example: 200
   notifiers: ['email'] # Delivery channels for the digest: 'email', 'webhook' (or both). Example: ['email', 'webhook']
   source: ??? # The sources of papers to retrieve. Example: ['arxiv','biorxiv','medrxiv','chemrxiv']
-  reranker: local # The reranker to use. Example: 'local' or 'api'
+  reranker: api # The reranker to use: 'api' (remote embedding API, no optional deps) or 'local'. 'local' requires the optional extra — install it with `pip install -e '.[local-reranker]'` (or `uv sync --extra local-reranker`) and set this to 'local'; otherwise the run degrades to unscored fetch order. Example: 'local' or 'api'
   rerank_alpha: 0.7 # Hybrid rerank weight: 1.0 = pure vector, 0.0 = pure BM25, null = vector only. Example: 0.7
 
 # When executor.notifiers includes 'webhook', configure it HERE (top level —

@@ -164,7 +164,7 @@ def test_parse_authors_splits_comma_joined_names():
 
 
 def test_parse_authors_prefers_author_string():
-    """feedparser joins every <author> into entry.author; use it when present."""
+    """No ``authors`` list at all (some feedparser versions) → split ``author``."""
     entry = SimpleNamespace(author="Alice, Bob, Charlie")
     assert _parse_authors(entry) == ["Alice", "Bob", "Charlie"]
 
@@ -172,6 +172,24 @@ def test_parse_authors_prefers_author_string():
 def test_parse_authors_joins_author_dicts():
     entry = SimpleNamespace(author="", authors=[{"name": "David"}, {"name": "Eva"}])
     assert _parse_authors(entry) == ["David", "Eva"]
+
+
+def test_parse_authors_handles_export_api_multiple_author_elements():
+    """BUG-3 regression: the export API emits one <author> per author and
+    feedparser sets ``entry.author`` to the LAST one — every author must be
+    kept, not just that one."""
+    entry = SimpleNamespace(
+        author="Dave D",  # feedparser's per-element overwrite: last author wins
+        authors=[{"name": "Alice A"}, {"name": "Bob B"}, {"name": "Carol C"}, {"name": "Dave D"}],
+    )
+    assert _parse_authors(entry) == ["Alice A", "Bob B", "Carol C", "Dave D"]
+
+
+def test_parse_authors_multiple_elements_not_comma_split():
+    """Each element IS one author on the API path: an element like
+    "Lastname, Firstname" must not be split in two."""
+    entry = SimpleNamespace(author="", authors=[{"name": "Smith, John"}, {"name": "Doe, Jane"}])
+    assert _parse_authors(entry) == ["Smith, John", "Doe, Jane"]
 
 
 def test_parse_authors_missing():
@@ -362,3 +380,93 @@ def test_fetch_feed_with_retry_raises_after_retries(config, monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="after 4 attempts"):
         ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")
+
+
+# ---------------------------------------------------------------------------
+# Retry policy (RES-4 / P3-24)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, retry_after: str | None = None):
+        self.status_code = status_code
+        self.headers = {"Retry-After": retry_after} if retry_after is not None else {}
+        self.content = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>t</title></feed>'
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
+
+
+def _patch_get(monkeypatch, responses):
+    import requests as _req
+
+    calls = {"n": 0}
+
+    def _get(url, **kwargs):
+        index = min(calls["n"], len(responses) - 1)
+        calls["n"] += 1
+        return responses[index]
+
+    monkeypatch.setattr(_req, "get", _get)
+    return calls
+
+
+def test_fetch_feed_with_retry_does_not_retry_permanent_4xx(config, monkeypatch):
+    """RES-4: 404/406/400 will never succeed — fail immediately instead of
+    burning 4 requests + ~30s of backoff per category."""
+    import pytest
+    import requests
+
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    delays: list[float] = []
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.arxiv_retriever.sleep", delays.append)
+    calls = _patch_get(monkeypatch, [_FakeResponse(404)])
+
+    with pytest.raises(requests.HTTPError):
+        ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")
+    assert calls["n"] == 1
+    assert delays == []
+
+
+def test_fetch_feed_with_retry_retries_429_and_caps_retry_after(config, monkeypatch):
+    """RES-4: transient 429 is retried, but a hostile Retry-After is capped."""
+    from zotero_arxiv_daily.retriever.arxiv_retriever import MAX_BACKOFF_SECONDS, ArxivRetriever
+
+    delays: list[float] = []
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.arxiv_retriever.sleep", delays.append)
+    calls = _patch_get(monkeypatch, [_FakeResponse(429, retry_after="86400"), _FakeResponse(200)])
+
+    feed = ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")
+    assert calls["n"] == 2
+    assert feed is not None
+    assert delays == [MAX_BACKOFF_SECONDS]
+
+
+def test_fetch_feed_with_retry_clamps_negative_retry_after(config, monkeypatch):
+    """P3-24: a negative Retry-After used to raise ValueError inside the
+    except-block, failing the whole source."""
+    from zotero_arxiv_daily.retriever.arxiv_retriever import ArxivRetriever
+
+    delays: list[float] = []
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.arxiv_retriever.sleep", delays.append)
+    calls = _patch_get(monkeypatch, [_FakeResponse(429, retry_after="-5"), _FakeResponse(200)])
+
+    ArxivRetriever._fetch_feed_with_retry("https://rss.arxiv.org/atom/cs.AI", "cs.AI")
+    assert calls["n"] == 2
+    assert delays == [0.0]
+
+
+def test_is_retryable_status():
+    from zotero_arxiv_daily.retriever.arxiv_retriever import _is_retryable_status
+
+    assert _is_retryable_status(408) is True
+    assert _is_retryable_status(429) is True
+    assert _is_retryable_status(500) is True
+    assert _is_retryable_status(503) is True
+    assert _is_retryable_status(400) is False
+    assert _is_retryable_status(404) is False
+    assert _is_retryable_status(None) is True

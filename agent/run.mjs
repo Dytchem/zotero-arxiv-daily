@@ -571,6 +571,11 @@ function buildTools(ctx) {
         }
         const data = await resp.json();
         const text = data.choices?.[0]?.message?.content || "(empty)";
+        // BUG-6: the sub-agent read the ENTIRE full text in one pass, so record
+        // it as read. Only inspect_paper used to write readDepth, which made
+        // finish_reading reject the ROLE.md-recommended flow
+        // (summarize_paper -> finish_reading) with "you have not read #N yet".
+        readDepth.set(params.index, Math.max(readDepth.get(params.index) || 0, full.length));
         return textResult(`Sub-agent reading of #${params.index} (${p.title}, ${full.length} chars, full text read in one pass):\n\n${text}`);
       },
     },

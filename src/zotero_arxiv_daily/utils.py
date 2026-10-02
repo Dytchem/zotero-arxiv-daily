@@ -136,11 +136,19 @@ def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | Non
 
             if main_tex is not None:
                 main_source:str = file_contents[main_tex]
-                #find and replace all included sub-files
-                include_files = re.findall(r'\\input\{(.+?)\}', main_source) + re.findall(r'\\include\{(.+?)\}', main_source)
-                for f in include_files:
-                    file_name = f + '.tex' if not f.endswith('.tex') else f
-                    main_source = main_source.replace(f'\\input{{{f}}}', file_contents.get(file_name, ''))
+                # Replace every included sub-file for BOTH \input{...} and
+                # \include{...}. The include list used to collect \include too,
+                # but the replacement only handled \input, so a paper organised
+                # with \include silently lost whole chapters (and left literal
+                # "\include{sec2}" in the "full text") — BUG-5.
+                # One regex + function replacement: the substituted body is
+                # never re-scanned, so sub-file content cannot trigger further
+                # substitutions.
+                def _sub_include(match: re.Match) -> str:
+                    ref = match.group(1)
+                    file_name = ref + '.tex' if not ref.endswith('.tex') else ref
+                    return file_contents.get(file_name, '')
+                main_source = re.sub(r'\\(?:input|include)\{(.+?)\}', _sub_include, main_source)
                 file_contents["all"] = main_source
             else:
                 logger.debug(f"Failed to find main tex file of {paper_id}: No tex file containing the document block.")

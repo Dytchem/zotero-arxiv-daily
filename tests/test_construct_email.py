@@ -6,6 +6,7 @@ from zotero_arxiv_daily.construct_email import (
     _mathify,
     get_empty_html,
     render_email,
+    render_email_with_shown,
     render_fallback,
 )
 from zotero_arxiv_daily.harness import Digest, DigestPaper, _today_str
@@ -638,3 +639,123 @@ def test_escaped_quotes_before_cjk_not_diaeresis():
         originals=[_paper(0, authors=["M\\\"uller", "Elisa Ercolessi"])],
     )
     assert "Müller" in html2
+
+
+# ---------------------------------------------------------------------------
+# shown-URL tracking (sent-history) — BUG-1
+# ---------------------------------------------------------------------------
+
+
+def test_render_email_with_shown_records_picked_index_zero_and_unpicked():
+    """index=0 is a valid pick and must be in the shown set; every unpicked
+    candidate actually rendered in the others block is in it too."""
+    digest = Digest(
+        subject="s", intro="", outro="",
+        papers=[DigestPaper(index=0, reason="top pick")],
+        others=[{"index": 1, "work_score": 6.0}],
+    )
+    originals = [_paper(i, title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(3)]
+    _html, shown = render_email_with_shown(digest, originals=originals, candidate_count=3)
+    assert shown == {originals[i].url for i in range(3)}
+
+
+def test_render_email_with_shown_excludes_candidates_hidden_by_max_others():
+    """BUG-1 regression: with 40 candidates, only 1 picked + 15 others are
+    rendered. The 24 hidden candidates must NOT be recorded as already-sent,
+    otherwise the "omitted" line becomes "permanently deleted"."""
+    originals = [_paper(i, title=f"Paper {i}", url=f"https://arxiv.org/abs/{i}") for i in range(40)]
+    digest = Digest(
+        subject="s", intro="", outro="",
+        papers=[DigestPaper(index=0, reason="lead")],
+        others=[{"index": i, "work_score": 5.0} for i in range(1, 40)],
+    )
+    html, shown = render_email_with_shown(digest, originals=originals)
+    # 1 picked card + 15 others
+    assert len(shown) == 16
+    assert originals[0].url in shown
+    assert "Paper 39" not in html  # hidden by the cap
+    for hidden in range(16, 40):
+        assert originals[hidden].url not in shown
+        assert f"Paper {hidden}" not in html
+    # every recorded URL is actually in the rendered HTML
+    for url in shown:
+        assert url in html
+
+
+def test_render_email_with_shown_empty_papers_still_records_rescued():
+    """An empty papers list is valid (nothing worth recommending) and still
+    renders the others block — rescued pool papers must be recorded too."""
+    originals = [_paper(i, title=f"P{i}", url=f"https://arxiv.org/abs/{i}") for i in range(4)]
+    digest = Digest(
+        subject="", intro="Nothing worth recommending.", outro="",
+        papers=[],
+        others=[{"index": 3, "work_score": 5.0}],  # 3 >= candidate_count=2: rescued
+    )
+    _html, shown = render_email_with_shown(digest, originals=originals, candidate_count=2)
+    assert {originals[i].url for i in (0, 1, 3)} <= shown
+    # The pool paper beyond candidate_count that the agent did NOT score stays
+    # hidden and therefore stays eligible for a later email.
+    assert originals[2].url not in shown
+
+
+def test_render_email_with_shown_none_digest_records_everything_rendered():
+    originals = [_paper(i, url=f"https://arxiv.org/abs/{i}") for i in range(3)]
+    _html, shown = render_email_with_shown(None, originals=originals)
+    assert shown == {p.url for p in originals}
+
+
+# ---------------------------------------------------------------------------
+# empty-digest copy: failures (BUG-2) and others-block contradiction (BUG-7)
+# ---------------------------------------------------------------------------
+
+
+def test_render_email_empty_digest_with_failures_names_the_source():
+    """BUG-2: the main path always gets a (fallback) Digest, so a rate-limited
+    arXiv run must still say WHY it is empty — not just 'take a rest'."""
+    digest = Digest(subject="s", intro="", papers=[], outro="")
+    html = render_email(digest, originals=[], failures=["arxiv"])
+    assert "arxiv" in html
+    assert "Retrieval failed" in html
+    assert "take a rest" in html
+
+
+def test_render_email_empty_digest_with_failures_chinese():
+    digest = Digest(subject="s", intro="", papers=[], outro="")
+    html = render_email(digest, originals=[], language="Chinese", failures=["arxiv"])
+    assert "抓取失败" in html and "arxiv" in html
+
+
+def test_render_fallback_empty_failures_is_escaped():
+    """P3-23: the failures note was the one unescaped HTML interpolation."""
+    html = render_fallback([], failures=["<script>alert(1)</script>"])
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_render_email_empty_digest_with_others_is_not_contradictory():
+    """BUG-7: the agent may pick nothing while candidates still exist — the
+    copy must not claim 'no papers' above a list of papers."""
+    originals = [_paper(i, title=f"Candidate {i}", url=f"https://arxiv.org/abs/{i}") for i in range(3)]
+    digest = Digest(subject="s", intro="", papers=[], outro="")
+    html = render_email(digest, originals=originals, candidate_count=3)
+    assert "Candidate 0" in html  # others block still rendered
+    assert "No Papers Today" not in html
+    assert "No new papers today" not in html
+    assert "No picks today" in html
+    assert "other candidates below" in html
+
+
+def test_render_email_empty_digest_chinese_with_others_is_not_contradictory():
+    originals = [_paper(i, title=f"候选论文{i}", url=f"https://arxiv.org/abs/{i}") for i in range(2)]
+    digest = Digest(subject="s", intro="", papers=[], outro="")
+    html = render_email(digest, originals=originals, candidate_count=2, language="Chinese")
+    assert "候选论文0" in html
+    assert "今日暂无相关新论文" not in html
+    assert "今日未选出精选" in html
+
+
+def test_render_email_truly_empty_digest_still_says_rest():
+    """No candidates at all (or no failures) keeps the original calm copy."""
+    html = render_email(Digest(subject="s", intro="", papers=[], outro=""), originals=[])
+    assert "No Papers Today" in html
+    assert "No new papers today" in html

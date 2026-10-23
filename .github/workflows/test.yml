@@ -8,17 +8,17 @@ jobs:
     timeout-minutes: 1440
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
         with:
           # SEC-1: the Pi agent runs with bash/read in the repo root; never
           # leave GITHUB_TOKEN behind in .git/config.
           persist-credentials: false
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v7.1.4
+        uses: astral-sh/setup-uv@v10.3.2
 
       - name: Setup node + install Pi agent
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload rendered email for review
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: last-email
           path: .cache/last_email.html
